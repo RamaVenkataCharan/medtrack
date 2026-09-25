@@ -12,9 +12,11 @@ client/dist/
 *.sqlite-shm
 *.sqlite-wal
 *.db
+*.backup
 server/db/*.sqlite
 server/db/*.sqlite-shm
 server/db/*.sqlite-wal
+server/export/
 
 # Environment variables
 .env

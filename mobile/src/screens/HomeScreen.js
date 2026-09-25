@@ -9,18 +9,46 @@ import {
   SafeAreaView,
   StatusBar,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { searchCustomers, getActiveDriverName } from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
+import { AuthService } from '../services/authService';
 
 export default function HomeScreen({ navigation }) {
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [userPhone, setUserPhone] = useState('');
+
+  useEffect(() => {
+    AuthService.getCurrentUser().then((user) => {
+      if (user?.phone) {
+        setUserPhone(user.phone);
+      }
+    });
+  }, []);
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      userPhone ? `Logged in as ${userPhone}.\nAre you sure you want to log out?` : 'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await AuthService.logout();
+          },
+        },
+      ]
+    );
+  };
 
   const loadData = useCallback(() => {
     try {
@@ -89,28 +117,38 @@ export default function HomeScreen({ navigation }) {
 
       {/* Notebook Header */}
       <View style={styles.header}>
-        <View>
+        <View style={{ flex: 1, marginRight: SPACING.sm }}>
           <Text style={styles.appTitle}>MedTrack</Text>
           <Text style={styles.appSubtitle}>
-            Medical Khata Book • {getActiveDriverName().includes('SQLITE') ? 'Native SQLite' : 'Web Fallback'}
+            {userPhone ? `Pharmacist: ${userPhone}` : `Medical Khata Book • ${getActiveDriverName().includes('SQLITE') ? 'Native SQLite' : 'Web Fallback'}`}
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.exportButton}
-          onPress={handleExport}
-          disabled={exporting}
-          accessibilityLabel="Export Backup"
-        >
-          {exporting ? (
-            <ActivityIndicator size="small" color={COLORS.primary} />
-          ) : (
-            <>
-              <Ionicons name="share-outline" size={18} color={COLORS.primary} />
-              <Text style={styles.exportButtonText}>Backup</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.exportButton}
+            onPress={handleExport}
+            disabled={exporting}
+            accessibilityLabel="Export Backup"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <>
+                <Ionicons name="share-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.exportButtonText}>Backup</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            accessibilityLabel="Logout"
+          >
+            <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Auto-focused Large Search Box */}
@@ -202,6 +240,20 @@ const styles = StyleSheet.create({
     ...FONTS.subtext,
     color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs + 2,
+  },
+  logoutButton: {
+    padding: SPACING.xs + 3,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.dangerLight,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   exportButton: {
     flexDirection: 'row',

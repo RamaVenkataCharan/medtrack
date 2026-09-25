@@ -22,15 +22,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes — Core Khata Ledger
-app.use('/api/customers', require('./routes/customers'));
-app.use('/api/entries', require('./routes/entries'));
-app.use('/api/payments', require('./routes/payments'));
-app.use('/api/medicines', require('./routes/medicines'));
-app.use('/api/reports', require('./routes/reports'));
-app.use('/api/bills', require('./routes/bills'));
+const { authMiddleware } = require('./middleware/auth');
 
-// Shop configuration & status
+// Public routes (no auth required)
 app.get('/api/config', (req, res) => {
   res.json({
     shop: config.SHOP,
@@ -40,8 +34,16 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), auth: 'supabase-jwt' });
 });
+
+// Protected routes (Supabase Phone Auth JWT required)
+app.use('/api/customers', authMiddleware, require('./routes/customers'));
+app.use('/api/entries', authMiddleware, require('./routes/entries'));
+app.use('/api/payments', authMiddleware, require('./routes/payments'));
+app.use('/api/medicines', authMiddleware, require('./routes/medicines'));
+app.use('/api/reports', authMiddleware, require('./routes/reports'));
+app.use('/api/bills', require('./routes/bills'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
