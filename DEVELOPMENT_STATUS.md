@@ -23,30 +23,44 @@ The ecosystem comprises three decoupled, standalone components:
 
 ## 🏗️ Architecture & Module Status
 
-```
-MedTrack Ecosystem
-├── [client] Web Desktop Counter (React 18 + Vite + Tailwind CSS)
-│   ├── Instant Phone-First Search (Global '/' Shortcut)
-│   ├── Khata Profile (3-Tab Architecture)
-│   ├── Counter Purchase Entry with Autocomplete
-│   ├── Payment Collection & Overpayment Guard
-│   └── Dues Report & Village Ledger Analytics
-│
-├── [server] Node.js Express REST API & SQLite WAL
-│   ├── Customers API (/api/customers)
-│   ├── Purchase Entries API (/api/entries)
-│   ├── Payments API (/api/payments)
-│   ├── Medicines Autocomplete API (/api/medicines)
-│   ├── PDF Bill Generation Service (PDFKit)
-│   └── Database Backup & Disaster Recovery Service
-│
-└── [mobile] Android Standalone App (Expo + Local SQLite)
-    ├── 100% Offline-First Architecture (Zero Server Dependency)
-    ├── Home Customer Search & Due Cards
-    ├── Customer Ledger & Chronological History
-    ├── New Visit & Multi-Medicine Line Entry
-    ├── JSON Khata Backup & Android Share Sheet
-    └── EAS Google Play Store / APK Configuration
+```mermaid
+graph TD
+    subgraph Clients["Frontend Clients"]
+        Web["Web Desktop Countertop (React 18 + Vite + Tailwind CSS)"]
+        Mobile["Mobile Android App (React Native Expo + Local SQLite)"]
+    end
+
+    subgraph AuthLayer["Authentication (Supabase Auth)"]
+        SupabaseAuth["Supabase Email OTP Engine"]
+        SessionStore["Local Storage / SecureStore"]
+    end
+
+    subgraph ServerLayer["Backend API (Node.js & Express)"]
+        APIServer["REST API Router (Port 4000)"]
+        AuthMiddleware["JWT Authentication Guard"]
+        PDFGen["Thermal PDF Bill Engine (PDFKit)"]
+        BackupService["Automated Daily DB Backup Service"]
+    end
+
+    subgraph DatabaseLayer["Data Persistence"]
+        PostgresDB[("Supabase Cloud PostgreSQL")]
+        SQLiteLocal[("Local SQLite WAL (better-sqlite3)")]
+        ShopProfileTab[("shop_profile Table (8 Fields)")]
+        CustomersTab[("customers (soft-delete with deleted_at)")]
+    end
+
+    Web -->|"Email OTP Sign In"| SupabaseAuth
+    Mobile -->|"Email OTP Sign In"| SupabaseAuth
+    SupabaseAuth -->|"Session Token"| SessionStore
+    Web -->|"Bearer JWT Authorization"| AuthMiddleware
+    AuthMiddleware --> APIServer
+    APIServer --> PDFGen
+    APIServer --> BackupService
+    APIServer --> PostgresDB
+    APIServer --> SQLiteLocal
+    Mobile -->|"Offline-First Direct Storage"| SQLiteLocal
+    PostgresDB --- CustomersTab
+    PostgresDB --- ShopProfileTab
 ```
 
 ---

@@ -1,10 +1,68 @@
 const express = require('express');
 const router = express.Router();
 const { getDb, getCustomerDue, getCustomerStats } = require('../db/database');
+const { supabase } = require('../db/supabaseClient');
+
+/**
+ * GET /api/customers
+ * Returns all active customers with their computed dues
+ */
+router.get('/', (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT customer_id, phone_number, name, village, address, created_at, updated_at
+      FROM customers
+      WHERE deleted_at IS NULL
+      ORDER BY created_at DESC
+    `).all();
+
+    const results = rows.map((c) => ({
+      ...c,
+      total_due: getCustomerDue(c.customer_id),
+    }));
+
+    res.json(results);
+  } catch (err) {
+    console.error('Get customers error:', err);
+    res.status(500).json({ error: 'Failed to retrieve customers' });
+  }
+});
+
+/**
+ * GET /api/customers/recycle/list
+ * Returns all items in recycle bin (alias to /deleted)
+ */
+router.get('/recycle/list', async (req, res) => {
+  try {
+    // 1. Try fetching from Supabase recycle_bin if accessible
+    try {
+      const { data, error } = await supabase
+        .from('recycle_bin')
+        .select('*')
+        .eq('permanently_deleted', false)
+        .order('deleted_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        return res.json(data);
+      }
+    } catch (sbErr) {
+      // Fallback to SQLite
+    }
+
+    // 2. Fallback to SQLite deleted customers
+    const { getDeletedCustomers } = require('../db/database');
+    const deleted = getDeletedCustomers();
+    res.json(deleted);
+  } catch (err) {
+    console.error('Get recycle list error:', err);
+    res.status(500).json({ error: 'Failed to fetch recycle bin list' });
+  }
+});
 
 /**
  * GET /api/customers/search?q=...
- * Primary search by 10-digit phone number, fallback by name or village
+ * Primary search by 10-digit phone number, fallback by name or village (excludes soft-deleted)
  */
 router.get('/search', (req, res) => {
   try {
@@ -18,22 +76,22 @@ router.get('/search', (req, res) => {
 
     let rows = [];
     if (isNumeric) {
-      // Exact match first, then prefix match
+      // Exact match first, then prefix match (only active customers)
       rows = db.prepare(`
         SELECT customer_id, phone_number, name, village, address, created_at, updated_at
         FROM customers
-        WHERE phone_number LIKE ?
+        WHERE (deleted_at IS NULL) AND phone_number LIKE ?
         ORDER BY
           CASE WHEN phone_number = ? THEN 0 ELSE 1 END,
           phone_number ASC
         LIMIT 15
       `).all(`${query}%`, query);
     } else {
-      // Substring match on name or village
+      // Substring match on name or village (only active customers)
       rows = db.prepare(`
         SELECT customer_id, phone_number, name, village, address, created_at, updated_at
         FROM customers
-        WHERE name LIKE ? OR village LIKE ?
+        WHERE (deleted_at IS NULL) AND (name LIKE ? OR village LIKE ?)
         ORDER BY name ASC
         LIMIT 15
       `).all(`%${query}%`, `%${query}%`);
@@ -48,6 +106,21 @@ router.get('/search', (req, res) => {
   } catch (err) {
     console.error('Customer search error:', err);
     res.status(500).json({ error: 'Failed to search customers' });
+  }
+});
+
+/**
+ * GET /api/customers/deleted
+ * Returns all soft-deleted customers for Recycle Bin
+ */
+router.get('/deleted', (req, res) => {
+  try {
+    const { getDeletedCustomers } = require('../db/database');
+    const deleted = getDeletedCustomers();
+    res.json(deleted);
+  } catch (err) {
+    console.error('Get deleted customers error:', err);
+    res.status(500).json({ error: 'Failed to fetch deleted customers' });
   }
 });
 
@@ -150,6 +223,116 @@ router.post('/', (req, res) => {
   } catch (err) {
     console.error('Create customer error:', err);
     res.status(500).json({ error: err.message || 'Failed to create customer' });
+  }
+});
+
+/**
+ * DELETE /api/customers/:id
+ * Soft delete customer (sets deleted_at = current timestamp and stores in recycle bin)
+ */
+router.delete('/:id', async (req, res) => {
+  try {
+    const customerId = parseInt(req.params.id, 10);
+    const userId = req.user?.id || req.userId || null;
+    const { softDeleteCustomer, getCustomerDue } = require('../db/database');
+    const db = getDb();
+
+    const customer = db.prepare('SELECT * FROM customers WHERE customer_id = ?').get(customerId);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const currentDue = getCustomerDue(customerId);
+    softDeleteCustomer(customerId);
+
+    // Sync to Supabase recycle_bin if available
+    try {
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from('recycle_bin')
+        .insert([{
+          deleted_customer_id: customerId,
+          customer_name: customer.name,
+          customer_phone: customer.phone_number,
+          customer_data: customer,
+          deleted_by: userId,
+          deleted_at: nowIso,
+        }]);
+
+      await supabase
+        .from('customers')
+        .update({
+          is_deleted: true,
+          deleted_at: nowIso,
+        })
+        .eq('customer_id', customerId);
+    } catch (sbErr) {
+      // Non-blocking for offline SQLite mode
+    }
+
+    res.json({
+      success: true,
+      message: `Customer ${customer.name} moved to Recycle Bin`,
+      customerId,
+      unpaidDue: currentDue,
+    });
+  } catch (err) {
+    console.error('Soft delete customer error:', err);
+    res.status(500).json({ error: err.message || 'Failed to soft delete customer' });
+  }
+});
+
+/**
+ * POST /api/customers/:id/restore
+ * Clears deleted_at timestamp, restoring customer to active status
+ */
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const customerId = parseInt(req.params.id, 10);
+    const { restoreCustomer } = require('../db/database');
+
+    restoreCustomer(customerId);
+
+    // Sync to Supabase
+    try {
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from('customers')
+        .update({
+          is_deleted: false,
+          deleted_at: null,
+        })
+        .eq('customer_id', customerId);
+
+      await supabase
+        .from('recycle_bin')
+        .update({ restored_at: nowIso })
+        .eq('deleted_customer_id', customerId);
+    } catch (sbErr) {
+      // Non-blocking
+    }
+
+    res.json({ success: true, message: 'Customer restored successfully', customerId });
+  } catch (err) {
+    console.error('Restore customer error:', err);
+    res.status(500).json({ error: err.message || 'Failed to restore customer' });
+  }
+});
+
+/**
+ * DELETE /api/customers/:id/permanent
+ * Hard delete customer and cascades entries, entry_medicines, and payments
+ */
+router.delete('/:id/permanent', (req, res) => {
+  try {
+    const customerId = parseInt(req.params.id, 10);
+    const { permanentDeleteCustomer } = require('../db/database');
+
+    permanentDeleteCustomer(customerId);
+    res.json({ success: true, message: 'Customer permanently deleted', customerId });
+  } catch (err) {
+    console.error('Permanent delete customer error:', err);
+    res.status(500).json({ error: err.message || 'Failed to permanently delete customer' });
   }
 });
 

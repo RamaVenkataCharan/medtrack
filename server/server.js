@@ -19,7 +19,10 @@ if (backupStatus.skipped) {
 const app = express();
 
 // Middleware
-app.use(cors());
+const corsOrigin = process.env.CORS_ORIGIN 
+  ? (process.env.CORS_ORIGIN.includes(',') ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : process.env.CORS_ORIGIN.trim())
+  : '*';
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 const { authMiddleware } = require('./middleware/auth');
@@ -37,12 +40,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), auth: 'supabase-jwt' });
 });
 
-// Protected routes (Supabase Phone Auth JWT required)
+// Protected routes (Supabase Auth JWT required)
 app.use('/api/customers', authMiddleware, require('./routes/customers'));
 app.use('/api/entries', authMiddleware, require('./routes/entries'));
 app.use('/api/payments', authMiddleware, require('./routes/payments'));
 app.use('/api/medicines', authMiddleware, require('./routes/medicines'));
 app.use('/api/reports', authMiddleware, require('./routes/reports'));
+app.use('/api/shop-profile', authMiddleware, require('./routes/shopProfile'));
 app.use('/api/bills', require('./routes/bills'));
 
 // Error handling middleware

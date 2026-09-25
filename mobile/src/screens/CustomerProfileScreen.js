@@ -5,20 +5,23 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ActivityIndicator,
   Modal,
   TextInput,
   Alert,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getCustomerById, getCustomerLedger, addDuePayment, softDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { isPaymentEntry } from '../utils/khataLogic';
+import { APIService } from '../services/apiService';
 
 export default function CustomerProfileScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
   const { customerId } = route.params;
 
   const [customer, setCustomer] = useState(null);
@@ -88,9 +91,10 @@ export default function CustomerProfileScreen({ route, navigation }) {
         {
           text: 'Move to Recycle Bin',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             try {
               softDeleteCustomer(customerId);
+              APIService.deleteCustomer(customerId).catch((e) => console.warn('Sync delete customer error:', e));
               Alert.alert('Moved to Recycle Bin', `"${customer.name}" was moved to the Recycle Bin.`);
               navigation.goBack();
             } catch (err) {
@@ -102,11 +106,13 @@ export default function CustomerProfileScreen({ route, navigation }) {
     );
   };
 
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
+
   if (loading || !customer) {
     return (
-      <SafeAreaView style={styles.centered}>
+      <View style={[styles.centered, { paddingTop: topPadding }]}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -183,7 +189,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       {/* Top Header */}
       <View style={styles.navBar}>
         <TouchableOpacity
@@ -324,7 +330,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

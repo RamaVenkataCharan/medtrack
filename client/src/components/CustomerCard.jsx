@@ -8,6 +8,7 @@ export default function CustomerCard({
   onAddPurchase,
   onCollectPayment,
   onBackToSearch,
+  onDeleteCustomer,
 }) {
   if (!customer) return null;
 
@@ -24,9 +25,22 @@ export default function CustomerCard({
           <span>Back to Search</span>
         </button>
 
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-          <Clock className="w-3.5 h-3.5 text-slate-400" />
-          <span>Last Visit: <strong className="text-slate-700">{formatRelativeTime(customer.last_visit)}</strong></span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span>Last Visit: <strong className="text-slate-700">{formatRelativeTime(customer.last_visit)}</strong></span>
+          </div>
+
+          {onDeleteCustomer && (
+            <button
+              type="button"
+              onClick={onDeleteCustomer}
+              className="inline-flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 py-1 px-2.5 rounded-lg transition-colors"
+              title="Delete Customer"
+            >
+              <span>Delete</span>
+            </button>
+          )}
         </div>
       </div>
 

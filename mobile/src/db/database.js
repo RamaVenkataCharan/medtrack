@@ -48,13 +48,17 @@ function initNativeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       entry_id INTEGER NOT NULL REFERENCES entries(entry_id),
       medicine_name TEXT NOT NULL,
-      price REAL DEFAULT 0
+      price REAL DEFAULT 0,
+      original_price REAL DEFAULT NULL,
+      discount_percent REAL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS shop_profile (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       shop_name TEXT DEFAULT '',
       shop_license_no TEXT DEFAULT '',
+      license_20b TEXT DEFAULT '',
+      license_21b TEXT DEFAULT '',
       shop_license_validity TEXT DEFAULT '',
       shop_phone TEXT DEFAULT '',
       pharmacist_name TEXT DEFAULT '',
@@ -66,7 +70,6 @@ function initNativeDatabase() {
     INSERT OR IGNORE INTO shop_profile (id) VALUES (1);
 
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone_number);
-    CREATE INDEX IF NOT EXISTS idx_customers_deleted ON customers(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
     CREATE INDEX IF NOT EXISTS idx_entry_meds_entry ON entry_medicines(entry_id);
   `);
@@ -79,8 +82,35 @@ function initNativeDatabase() {
       db.execSync(`ALTER TABLE customers ADD COLUMN deleted_at TEXT DEFAULT NULL;`);
       console.log('[MedTrack] Migration: added deleted_at column to customers');
     }
+    db.execSync(`CREATE INDEX IF NOT EXISTS idx_customers_deleted ON customers(deleted_at);`);
   } catch (err) {
     console.warn('[MedTrack] Migration notice for deleted_at:', err.message);
+  }
+
+  // Non-destructive migration: guarantee license_20b and license_21b exist on shop_profile
+  try {
+    const shopInfo = db.getAllSync(`PRAGMA table_info(shop_profile);`);
+    const has20b = shopInfo.some((col) => col.name === 'license_20b');
+    if (!has20b) {
+      db.execSync(`ALTER TABLE shop_profile ADD COLUMN license_20b TEXT DEFAULT '';`);
+      db.execSync(`ALTER TABLE shop_profile ADD COLUMN license_21b TEXT DEFAULT '';`);
+      console.log('[MedTrack] Migration: added license_20b and license_21b columns to shop_profile');
+    }
+  } catch (err) {
+    console.warn('[MedTrack] Migration notice for shop_profile columns:', err.message);
+  }
+
+  // Non-destructive migration: guarantee original_price & discount_percent exist on entry_medicines
+  try {
+    const medInfo = db.getAllSync(`PRAGMA table_info(entry_medicines);`);
+    const hasDiscount = medInfo.some((col) => col.name === 'discount_percent');
+    if (!hasDiscount) {
+      db.execSync(`ALTER TABLE entry_medicines ADD COLUMN original_price REAL DEFAULT NULL;`);
+      db.execSync(`ALTER TABLE entry_medicines ADD COLUMN discount_percent REAL DEFAULT 0;`);
+      console.log('[MedTrack] Migration: added original_price and discount_percent to entry_medicines');
+    }
+  } catch (err) {
+    console.warn('[MedTrack] Migration notice for entry_medicines discount columns:', err.message);
   }
 }
 
@@ -556,11 +586,16 @@ export function addPurchaseEntry({ customerId, medicines = [], totalAmount = 0, 
 
     for (const med of medicines) {
       if (med.name && med.name.trim()) {
+        const medPrice = parseFloat(med.price) || 0;
+        const origPrice = med.original_price != null ? parseFloat(med.original_price) : medPrice;
+        const discPct = med.discount_percent != null ? parseFloat(med.discount_percent) : 0;
         state.entry_medicines.push({
           id: state.nextMedicineId++,
           entry_id: entryId,
           medicine_name: med.name.trim(),
-          price: parseFloat(med.price) || 0,
+          price: medPrice,
+          original_price: origPrice,
+          discount_percent: discPct,
         });
       }
     }
@@ -584,10 +619,12 @@ export function addPurchaseEntry({ customerId, medicines = [], totalAmount = 0, 
     for (const med of medicines) {
       if (med.name && med.name.trim()) {
         const medPrice = parseFloat(med.price) || 0;
+        const origPrice = med.original_price != null ? parseFloat(med.original_price) : medPrice;
+        const discPct = med.discount_percent != null ? parseFloat(med.discount_percent) : 0;
         db.runSync(`
-          INSERT INTO entry_medicines (entry_id, medicine_name, price)
-          VALUES (?, ?, ?);
-        `, [insertedEntryId, med.name.trim(), medPrice]);
+          INSERT INTO entry_medicines (entry_id, medicine_name, price, original_price, discount_percent)
+          VALUES (?, ?, ?, ?, ?);
+        `, [insertedEntryId, med.name.trim(), medPrice, origPrice, discPct]);
       }
     }
   });
@@ -649,6 +686,8 @@ export function getShopProfile() {
     id: 1,
     shop_name: '',
     shop_license_no: '',
+    license_20b: '',
+    license_21b: '',
     shop_license_validity: '',
     shop_phone: '',
     pharmacist_name: '',
@@ -676,6 +715,8 @@ export function saveShopProfile(profile = {}) {
   const sanitized = {
     shop_name: (profile.shop_name || '').trim(),
     shop_license_no: (profile.shop_license_no || '').trim(),
+    license_20b: (profile.license_20b || profile.shop_license_no || '').trim(),
+    license_21b: (profile.license_21b || '').trim(),
     shop_license_validity: (profile.shop_license_validity || '').trim(),
     shop_phone: (profile.shop_phone || '').trim(),
     pharmacist_name: (profile.pharmacist_name || '').trim(),
@@ -701,16 +742,20 @@ export function saveShopProfile(profile = {}) {
       id,
       shop_name,
       shop_license_no,
+      license_20b,
+      license_21b,
       shop_license_validity,
       shop_phone,
       pharmacist_name,
       pharmacist_phone,
       pharmacist_license_validity,
       updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       shop_name = excluded.shop_name,
       shop_license_no = excluded.shop_license_no,
+      license_20b = excluded.license_20b,
+      license_21b = excluded.license_21b,
       shop_license_validity = excluded.shop_license_validity,
       shop_phone = excluded.shop_phone,
       pharmacist_name = excluded.pharmacist_name,
@@ -720,6 +765,8 @@ export function saveShopProfile(profile = {}) {
   `, [
     sanitized.shop_name,
     sanitized.shop_license_no,
+    sanitized.license_20b,
+    sanitized.license_21b,
     sanitized.shop_license_validity,
     sanitized.shop_phone,
     sanitized.pharmacist_name,

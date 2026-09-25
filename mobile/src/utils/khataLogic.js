@@ -51,3 +51,16 @@ export function isPaymentEntry(entry) {
 
   return (total === 0 && paid > 0) || (hasNoMeds && paid > 0);
 }
+
+/**
+ * Percentage-based discount calculation on a line item.
+ * netTotal = price - (price * discountPercent / 100), clamped between 0 and price.
+ */
+export function calculateLineTotal(price, discountPercent) {
+  const rawPrice = parseFloat(price);
+  if (isNaN(rawPrice) || rawPrice <= 0) return 0;
+  const pct = Math.min(100, Math.max(0, parseFloat(discountPercent) || 0));
+  const net = rawPrice - (rawPrice * pct) / 100;
+  return parseFloat(Math.max(0, Math.min(rawPrice, Math.round(net * 100) / 100)).toFixed(2));
+}
+

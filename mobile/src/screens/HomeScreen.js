@@ -6,24 +6,29 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
-import { searchCustomers, getActiveDriverName } from '../db/database';
+import { searchCustomers, getActiveDriverName, getDeletedCustomerCount, softDeleteCustomer } from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
 import { AuthService } from '../services/authService';
+import { APIService } from '../services/apiService';
+import CustomerCard from '../components/CustomerCard';
 
 export default function HomeScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [userPhone, setUserPhone] = useState('');
+  const [deletedCount, setDeletedCount] = useState(0);
 
   useEffect(() => {
     AuthService.getCurrentUser().then((user) => {
@@ -78,91 +83,111 @@ export default function HomeScreen({ navigation }) {
     setExporting(false);
   };
 
-  const renderCustomerItem = ({ item }) => {
-    const totalDue = parseFloat(item.total_due || 0);
-    const hasDue = totalDue > 0;
+  const handleDeleteCustomer = (customer) => {
+    const currentDue = parseFloat(customer.total_due || 0);
+    const dueWarning = currentDue > 0
+      ? `\n\n⚠️ Warning: ${customer.name} currently has an unpaid balance of ₹${currentDue.toFixed(2)}.`
+      : '';
 
-    return (
-      <TouchableOpacity
-        activeOpacity={0.7}
-        style={styles.customerCard}
-        onPress={() => navigation.navigate('CustomerProfile', { customerId: item.customer_id })}
-      >
-        <View style={styles.cardHeader}>
-          <Text style={styles.customerName}>{item.name}</Text>
-          <View style={[styles.dueBadge, hasDue ? styles.dueBadgeAlert : styles.dueBadgeClear]}>
-            <Text style={[styles.dueBadgeText, hasDue ? styles.dueBadgeTextAlert : styles.dueBadgeTextClear]}>
-              {hasDue ? `₹${totalDue.toFixed(0)} due` : 'All clear'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.cardDetails}>
-          <Text style={styles.detailText}>
-            <Ionicons name="call-outline" size={13} color={COLORS.textSecondary} /> {item.phone_number}
-          </Text>
-          {item.village ? (
-            <Text style={styles.detailText}>
-              <Ionicons name="location-outline" size={13} color={COLORS.textSecondary} /> {item.village}
-            </Text>
-          ) : null}
-        </View>
-      </TouchableOpacity>
+    Alert.alert(
+      '🗑️ Delete Customer',
+      `Are you sure you want to delete ${customer.name}? This can be restored from recycle bin.${dueWarning}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              softDeleteCustomer(customer.customer_id);
+              APIService.deleteCustomer(customer.customer_id).catch(() => {});
+              Alert.alert('✅ Deleted', `"${customer.name}" moved to recycle bin`);
+              loadData();
+              const count = getDeletedCustomerCount();
+              setDeletedCount(count);
+            } catch (err) {
+              Alert.alert('❌ Error', err.message || 'Failed to delete customer');
+            }
+          },
+        },
+      ]
     );
   };
 
+  const renderCustomerItem = ({ item }) => {
+    return (
+      <CustomerCard
+        customer={item}
+        onPress={() => navigation.navigate('CustomerProfile', { customerId: item.customer_id })}
+        onDelete={() => handleDeleteCustomer(item)}
+      />
+    );
+  };
+
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.sm;
+  const bottomFabPadding = Math.max(insets.bottom, SPACING.md) + SPACING.lg;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
       {/* Notebook Header */}
       <View style={styles.header}>
-        <View style={{ flex: 1, marginRight: SPACING.sm }}>
+        <View style={{ flex: 1, marginRight: SPACING.xs }}>
           <Text style={styles.appTitle}>MedTrack</Text>
-          <Text style={styles.appSubtitle}>
-            {userPhone ? `Pharmacist: ${userPhone}` : `Medical Khata Book • ${getActiveDriverName().includes('SQLITE') ? 'Native SQLite' : 'Web Fallback'}`}
+          <Text style={styles.appSubtitle} numberOfLines={1}>
+            {userPhone ? `Pharmacist: ${userPhone}` : `Medical Khata Book`}
           </Text>
         </View>
 
         <View style={styles.headerActions}>
+          {/* Action 1: Backup */}
           <TouchableOpacity
-            style={styles.exportButton}
+            style={styles.headerBackupBtn}
             onPress={handleExport}
             disabled={exporting}
             accessibilityLabel="Export Backup"
+            activeOpacity={0.8}
           >
             {exporting ? (
               <ActivityIndicator size="small" color={COLORS.primary} />
             ) : (
               <>
-                <Ionicons name="share-outline" size={16} color={COLORS.primary} />
-                <Text style={styles.exportButtonText}>Backup</Text>
+                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} style={{ marginRight: 4 }} />
+                <Text style={styles.headerBackupText}>Backup</Text>
               </>
             )}
           </TouchableOpacity>
 
+          {/* Action 2: Recycle Bin */}
           <TouchableOpacity
-            style={styles.iconActionBtn}
+            style={styles.headerIconBtn}
             onPress={() => navigation.navigate('RecycleBin')}
             accessibilityLabel="Recycle Bin"
             activeOpacity={0.7}
           >
             <Ionicons name="trash-bin-outline" size={17} color={COLORS.textSecondary} />
+            {deletedCount > 0 && (
+              <View style={styles.actionBadgeDot} />
+            )}
           </TouchableOpacity>
 
+          {/* Action 3: Settings Gear Icon */}
           <TouchableOpacity
-            style={styles.iconActionBtn}
-            onPress={() => navigation.navigate('Settings')}
+            style={styles.headerIconBtn}
+            onPress={() => navigation.navigate('UserProfile')}
             accessibilityLabel="Settings"
             activeOpacity={0.7}
           >
             <Ionicons name="settings-outline" size={17} color={COLORS.textSecondary} />
           </TouchableOpacity>
 
+          {/* Action 4: Logout */}
           <TouchableOpacity
-            style={styles.logoutButton}
+            style={[styles.headerIconBtn, styles.headerLogoutBtn]}
             onPress={handleLogout}
             accessibilityLabel="Logout"
+            activeOpacity={0.7}
           >
             <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
           </TouchableOpacity>
@@ -217,7 +242,7 @@ export default function HomeScreen({ navigation }) {
           data={customers}
           keyExtractor={(item) => String(item.customer_id)}
           renderItem={renderCustomerItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: bottomFabPadding + 64 }]}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -225,15 +250,15 @@ export default function HomeScreen({ navigation }) {
       {/* Floating Add Customer Button */}
       {customers.length > 0 && (
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { bottom: bottomFabPadding }]}
           activeOpacity={0.85}
           onPress={() => navigation.navigate('AddCustomer', { initialPhoneOrName: query.trim() })}
         >
-          <Ionicons name="person-add" size={20} color={COLORS.textInverted} />
+          <Ionicons name="person-add" size={18} color={COLORS.textInverted} />
           <Text style={styles.fabText}>+ Add Customer</Text>
         </TouchableOpacity>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -262,41 +287,52 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs + 2,
+    gap: 6,
   },
-  iconActionBtn: {
-    padding: SPACING.xs + 3,
+  headerBackupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
+  },
+  headerBackupText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  headerIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.border,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  logoutButton: {
-    padding: SPACING.xs + 3,
-    borderRadius: RADIUS.pill,
+  headerLogoutBtn: {
     backgroundColor: COLORS.dangerLight,
-    borderWidth: 1,
     borderColor: '#FCA5A5',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  exportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs + 3,
-    borderRadius: RADIUS.pill,
-    borderWidth: 1,
-    borderColor: COLORS.primaryBorder,
-    gap: 4,
-  },
-  exportButtonText: {
-    ...FONTS.subtext,
-    fontWeight: '600',
-    color: COLORS.primary,
+  actionBadgeDot: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: COLORS.primary,
+    borderWidth: 1.5,
+    borderColor: COLORS.surface,
   },
   searchContainer: {
     flexDirection: 'row',

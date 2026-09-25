@@ -19,8 +19,15 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'At least one medicine is required' });
     }
 
-    const total = parseFloat(total_amount !== undefined ? total_amount : totalAmount);
-    const paid = parseFloat(amount_paid !== undefined ? amount_paid : (amountPaid !== undefined ? amountPaid : 0));
+    let total = parseFloat(total_amount !== undefined ? total_amount : totalAmount);
+    if (isNaN(total)) {
+      total = medicines.reduce((sum, m) => {
+        const price = parseFloat(m.price || m.original_price) || 0;
+        const discount = parseFloat(m.discount || m.discount_percent) || 0;
+        const discountedPrice = price - (price * discount / 100);
+        return sum + (discountedPrice * (parseInt(m.quantity, 10) || 1));
+      }, 0);
+    }
 
     if (isNaN(total) || total <= 0) {
       return res.status(400).json({ error: 'Total amount must be greater than 0' });
@@ -79,7 +86,7 @@ router.get('/', (req, res) => {
 
     // Fetch line items for each entry
     const getMedsStmt = db.prepare(`
-      SELECT id, entry_id, medicine_name, price
+      SELECT id, entry_id, medicine_name, price, discount_percent, original_price
       FROM entry_medicine
       WHERE entry_id = ?
       ORDER BY id ASC
@@ -138,7 +145,7 @@ router.get('/:id', (req, res) => {
     }
 
     const medicines = db.prepare(`
-      SELECT id, medicine_name, price
+      SELECT id, medicine_name, price, discount_percent, original_price
       FROM entry_medicine
       WHERE entry_id = ?
       ORDER BY id ASC

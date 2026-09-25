@@ -67,6 +67,18 @@ export class APIService {
     });
   }
 
+  static async deleteCustomer(id) {
+    return this.makeRequest(`/api/customers/${id}`, 'DELETE');
+  }
+
+  static async restoreCustomer(id) {
+    return this.makeRequest(`/api/customers/${id}/restore`, 'POST');
+  }
+
+  static async getRecycleBin() {
+    return this.makeRequest('/api/customers/recycle/list');
+  }
+
   // ═══════════════════════════════════════════════════════════
   // ENTRY (PURCHASE) OPERATIONS
   // ═══════════════════════════════════════════════════════════

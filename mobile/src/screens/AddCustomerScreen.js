@@ -5,18 +5,20 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { addCustomer, getCustomerByPhone } from '../db/database';
 import { cleanPhoneNumber } from '../utils/khataLogic';
 
 export default function AddCustomerScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
   const initialValue = route.params?.initialPhoneOrName || '';
   const isNumericInitial = /^\d+$/.test(initialValue);
 
@@ -78,8 +80,10 @@ export default function AddCustomerScreen({ navigation, route }) {
     }
   };
 
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
@@ -159,7 +163,7 @@ export default function AddCustomerScreen({ navigation, route }) {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

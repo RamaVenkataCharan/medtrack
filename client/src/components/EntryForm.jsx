@@ -8,7 +8,7 @@ import Modal from './Modal';
 export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
   const { addToast } = useToast();
 
-  const [medicines, setMedicines] = useState([{ name: '', price: '' }]);
+  const [medicines, setMedicines] = useState([{ name: '', price: '', discount: '' }]);
   const [totalAmountInput, setTotalAmountInput] = useState('');
   const [isManualTotal, setIsManualTotal] = useState(false);
   const [amountPaid, setAmountPaid] = useState('');
@@ -25,7 +25,7 @@ export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
-      setMedicines([{ name: '', price: '' }]);
+      setMedicines([{ name: '', price: '', discount: '' }]);
       setTotalAmountInput('');
       setIsManualTotal(false);
       setAmountPaid('');
@@ -64,7 +64,7 @@ export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
 
   // Medicine row addition/removal
   const addMedicineRow = () => {
-    setMedicines([...medicines, { name: '', price: '' }]);
+    setMedicines([...medicines, { name: '', price: '', discount: '' }]);
   };
 
   const removeMedicineRow = (index) => {
@@ -80,11 +80,29 @@ export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
     setMedicines(updated);
   };
 
-  // Compute sum of medicine prices
-  const sumOfPrices = medicines.reduce((sum, item) => {
-    const p = parseFloat(item.price);
-    return sum + (isNaN(p) ? 0 : p);
-  }, 0);
+  const handleDiscountChange = (index, value) => {
+    const clean = value.replace(/[^\d.]/g, '');
+    const num = parseFloat(clean);
+    const clamped = isNaN(num) ? '' : Math.min(100, Math.max(0, num)).toString();
+    const updated = [...medicines];
+    updated[index].discount = clean === '' ? '' : clamped;
+    setMedicines(updated);
+  };
+
+  // Helper to compute net price of an item post-discount
+  const getItemNetPrice = (item) => {
+    const raw = parseFloat(item.price);
+    if (isNaN(raw) || raw < 0) return 0;
+    const discount = Math.min(100, Math.max(0, parseFloat(item.discount) || 0));
+    // netTotal = price - (price * discountPercent / 100), clamped between 0 and original price
+    const net = raw - (raw * discount) / 100;
+    return Math.max(0, Math.min(raw, Math.round(net * 100) / 100));
+  };
+
+  // Compute sum of net medicine prices post-discount
+  const sumOfPrices = Math.round(
+    medicines.reduce((sum, item) => sum + getItemNetPrice(item), 0) * 100
+  ) / 100;
 
   // Derived or manual total
   const computedTotal = isManualTotal && totalAmountInput !== ''
@@ -98,7 +116,20 @@ export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const validMeds = medicines.filter((m) => m.name.trim() !== '');
+    const validMeds = medicines
+      .filter((m) => m.name.trim() !== '')
+      .map((m) => {
+        const raw = parseFloat(m.price) || 0;
+        const net = getItemNetPrice(m);
+        const disc = Math.min(100, Math.max(0, parseFloat(m.discount) || 0));
+        return {
+          name: m.name.trim(),
+          price: net,
+          original_price: raw,
+          discount_percent: disc,
+        };
+      });
+
     if (validMeds.length === 0) {
       addToast('Please enter at least one medicine name', 'warning');
       return;
@@ -200,64 +231,93 @@ export default function EntryForm({ isOpen, onClose, customer, onSuccess }) {
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* Medicine Line Items */}
           <div className="space-y-2">
-            <div className="flex justify-between items-center text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              <span>Medicine / Prescription Items *</span>
-              <span>Price (Optional)</span>
+            <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
+              <span className="col-span-6">Medicine / Prescription Items *</span>
+              <span className="col-span-2 text-right">Price (₹)</span>
+              <span className="col-span-2 text-right">Disc %</span>
+              <span className="col-span-2 text-right">Net (₹)</span>
             </div>
 
-            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-              {medicines.map((item, idx) => (
-                <div key={idx} className="relative flex items-center gap-2">
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      required={idx === 0}
-                      value={item.name}
-                      onChange={(e) => handleMedicineNameChange(idx, e.target.value)}
-                      placeholder={`Medicine name (e.g. Paracetamol 650mg)`}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white"
-                    />
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {medicines.map((item, idx) => {
+                const net = getItemNetPrice(item);
+                const hasDiscount = parseFloat(item.discount) > 0;
 
-                    {/* Autocomplete popup */}
-                    {activeSuggestionIndex === idx && suggestions.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 divide-y divide-slate-100 z-50 max-h-36 overflow-y-auto">
-                        {suggestions.map((s, sIdx) => (
-                          <div
-                            key={sIdx}
-                            onClick={() => selectSuggestion(idx, s)}
-                            className="px-3 py-2 text-xs text-slate-800 hover:bg-indigo-50 cursor-pointer font-medium"
-                          >
-                            {s}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                return (
+                  <div key={idx} className="relative grid grid-cols-12 gap-2 items-center">
+                    {/* Medicine Name with Autocomplete */}
+                    <div className="col-span-6 relative">
+                      <input
+                        type="text"
+                        required={idx === 0}
+                        value={item.name}
+                        onChange={(e) => handleMedicineNameChange(idx, e.target.value)}
+                        placeholder={`e.g. Paracetamol 650mg`}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white"
+                      />
+
+                      {/* Autocomplete popup */}
+                      {activeSuggestionIndex === idx && suggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 divide-y divide-slate-100 z-50 max-h-36 overflow-y-auto">
+                          {suggestions.map((s, sIdx) => (
+                            <div
+                              key={sIdx}
+                              onClick={() => selectSuggestion(idx, s)}
+                              className="px-3 py-2 text-xs text-slate-800 hover:bg-indigo-50 cursor-pointer font-medium"
+                            >
+                              {s}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Original Price */}
+                    <div className="col-span-2 relative">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={item.price}
+                        onChange={(e) => handlePriceChange(idx, e.target.value)}
+                        placeholder="0.00"
+                        className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 text-right focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white"
+                      />
+                    </div>
+
+                    {/* Discount % (0-100) */}
+                    <div className="col-span-2 relative">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="100"
+                        value={item.discount}
+                        onChange={(e) => handleDiscountChange(idx, e.target.value)}
+                        placeholder="0%"
+                        className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 text-right focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white"
+                      />
+                    </div>
+
+                    {/* Net Total Display & Remove Row */}
+                    <div className="col-span-2 flex items-center justify-end gap-1.5 text-right font-mono text-xs">
+                      <span className={`font-semibold ${hasDiscount ? 'text-indigo-600' : 'text-slate-800'}`}>
+                        ₹{net.toFixed(2)}
+                      </span>
+                      {medicines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeMedicineRow(idx)}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                          title="Remove item"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="w-24 relative">
-                    <span className="absolute left-2.5 top-2 text-slate-400">₹</span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={item.price}
-                      onChange={(e) => handlePriceChange(idx, e.target.value)}
-                      placeholder="0.00"
-                      className="w-full pl-6 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 text-right focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white"
-                    />
-                  </div>
-
-                  {medicines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeMedicineRow(idx)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <button

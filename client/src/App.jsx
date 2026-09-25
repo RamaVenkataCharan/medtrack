@@ -4,14 +4,20 @@ import { ToastProvider } from './components/Toast';
 import Home from './pages/Home';
 import CustomerProfile from './pages/CustomerProfile';
 import DuesReport from './pages/DuesReport';
+import RecycleBin from './pages/RecycleBin';
+import ShopProfile from './pages/ShopProfile';
 import PinLockModal from './components/PinLockModal';
+import LoginModal from './components/LoginModal';
+import { auth } from './utils/auth';
 
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes auto-lock
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('home'); // 'home' | 'profile' | 'dues'
+  const [currentView, setCurrentView] = useState('home'); // 'home' | 'profile' | 'dues' | 'recycle_bin' | 'shop_profile'
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const timerRef = useRef(null);
 
   // Inactivity Auto-Lock
@@ -21,6 +27,25 @@ export default function App() {
       setIsLocked(true);
     }, INACTIVITY_TIMEOUT_MS);
   };
+
+  // Auth Initialization & Session Persistence Check
+  useEffect(() => {
+    auth.getSession()
+      .then((currSession) => {
+        setSession(currSession);
+      })
+      .finally(() => {
+        setAuthLoading(false);
+      });
+
+    const subscription = auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => {
+      subscription?.unsubscribe?.();
+    };
+  }, []);
 
   useEffect(() => {
     const handleUserActivity = () => {
@@ -49,6 +74,19 @@ export default function App() {
     setCurrentView('home');
   };
 
+  const handleLogout = async () => {
+    await auth.signOut();
+    setSession(null);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
   return (
     <ToastProvider>
       <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-indigo-600 selection:text-white">
@@ -58,6 +96,8 @@ export default function App() {
           setCurrentView={setCurrentView}
           onBackToSearch={handleBackToSearch}
           onLock={() => setIsLocked(true)}
+          user={session?.user}
+          onLogout={handleLogout}
         />
 
         {/* Main Content View */}
@@ -81,7 +121,28 @@ export default function App() {
               onSelectCustomer={handleSelectCustomer}
             />
           )}
+
+          {currentView === 'recycle_bin' && (
+            <RecycleBin
+              onBackToSearch={handleBackToSearch}
+              onSelectCustomer={handleSelectCustomer}
+            />
+          )}
+
+          {currentView === 'shop_profile' && (
+            <ShopProfile
+              onBack={handleBackToSearch}
+            />
+          )}
         </main>
+
+        {/* Supabase Email OTP Login Modal (when session is null) */}
+        {!session && (
+          <LoginModal
+            isOpen={!session}
+            onLoginSuccess={(newSession) => setSession(newSession)}
+          />
+        )}
 
         {/* Security PIN Gate Modal */}
         <PinLockModal

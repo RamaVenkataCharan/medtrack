@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
@@ -19,6 +20,7 @@ import { getShopProfile, saveShopProfile, getDeletedCustomerCount } from '../db/
 import { exportKhataBackup } from '../services/exportService';
 
 export default function SettingsScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -27,12 +29,23 @@ export default function SettingsScreen({ navigation }) {
   const [profile, setProfile] = useState({
     shop_name: '',
     shop_license_no: '',
+    license_20b: '',
+    license_21b: '',
     shop_license_validity: '',
     shop_phone: '',
     pharmacist_name: '',
     pharmacist_phone: '',
     pharmacist_license_validity: '',
   });
+
+  const isExpired = (dateStr) => {
+    if (!dateStr) return false;
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date < today;
+  };
 
   const loadData = useCallback(() => {
     try {
@@ -41,6 +54,8 @@ export default function SettingsScreen({ navigation }) {
         setProfile({
           shop_name: data.shop_name || '',
           shop_license_no: data.shop_license_no || '',
+          license_20b: data.license_20b || data.shop_license_no || '',
+          license_21b: data.license_21b || '',
           shop_license_validity: data.shop_license_validity || '',
           shop_phone: data.shop_phone || '',
           pharmacist_name: data.pharmacist_name || '',
@@ -93,6 +108,11 @@ export default function SettingsScreen({ navigation }) {
     );
   }
 
+  const shopExpired = isExpired(profile.shop_license_validity);
+  const pharmacistExpired = isExpired(profile.pharmacist_license_validity);
+
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -101,7 +121,7 @@ export default function SettingsScreen({ navigation }) {
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
       {/* Header */}
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { paddingTop: topPadding }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
@@ -179,25 +199,37 @@ export default function SettingsScreen({ navigation }) {
             onChangeText={(v) => handleChange('shop_name', v)}
           />
 
-          <Text style={styles.inputLabel}>Drug License No (DL)</Text>
+          <Text style={styles.inputLabel}>Shop License Number (Form 20B)</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. DL-20B/21B-54892"
+            placeholder="e.g. 20B/1234/2024"
             placeholderTextColor={COLORS.textTertiary}
-            value={profile.shop_license_no}
-            onChangeText={(v) => handleChange('shop_license_no', v)}
+            value={profile.license_20b}
+            onChangeText={(v) => handleChange('license_20b', v)}
           />
 
-          <Text style={styles.inputLabel}>License Validity</Text>
+          <Text style={styles.inputLabel}>Shop License Number (Form 21B)</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. 2028-12-31"
+            placeholder="e.g. 21B/5678/2024"
+            placeholderTextColor={COLORS.textTertiary}
+            value={profile.license_21b}
+            onChangeText={(v) => handleChange('license_21b', v)}
+          />
+
+          <View style={styles.labelRow}>
+            <Text style={styles.inputLabel}>Shop License Validity</Text>
+            {shopExpired && <Text style={styles.expiredBadge}>(Expired)</Text>}
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="YYYY-MM-DD (e.g. 2028-12-31)"
             placeholderTextColor={COLORS.textTertiary}
             value={profile.shop_license_validity}
             onChangeText={(v) => handleChange('shop_license_validity', v)}
           />
 
-          <Text style={styles.inputLabel}>Shop Phone</Text>
+          <Text style={styles.inputLabel}>Shop Phone Number</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. +91 98765 43210"
@@ -214,7 +246,7 @@ export default function SettingsScreen({ navigation }) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.inputLabel}>Pharmacist In-Charge</Text>
+          <Text style={styles.inputLabel}>Pharmacist Name</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Charan, B.Pharm (Reg # 9848)"
@@ -223,7 +255,7 @@ export default function SettingsScreen({ navigation }) {
             onChangeText={(v) => handleChange('pharmacist_name', v)}
           />
 
-          <Text style={styles.inputLabel}>Pharmacist Phone</Text>
+          <Text style={styles.inputLabel}>Pharmacist Phone Number</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. 9848012345"
@@ -233,10 +265,13 @@ export default function SettingsScreen({ navigation }) {
             onChangeText={(v) => handleChange('pharmacist_phone', v)}
           />
 
-          <Text style={styles.inputLabel}>Pharmacist Registration Validity</Text>
+          <View style={styles.labelRow}>
+            <Text style={styles.inputLabel}>Pharmacist License Validity</Text>
+            {pharmacistExpired && <Text style={styles.expiredBadge}>(Expired)</Text>}
+          </View>
           <TextInput
             style={styles.input}
-            placeholder="e.g. 2029-06-30"
+            placeholder="YYYY-MM-DD (e.g. 2029-06-30)"
             placeholderTextColor={COLORS.textTertiary}
             value={profile.pharmacist_license_validity}
             onChangeText={(v) => handleChange('pharmacist_license_validity', v)}
@@ -364,6 +399,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.03,
     shadowRadius: 3,
     elevation: 1,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SPACING.md,
+    marginBottom: 4,
+  },
+  expiredBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textTertiary,
+    backgroundColor: COLORS.surfaceSubtle,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.xs,
   },
   inputLabel: {
     ...FONTS.bodySecondary,

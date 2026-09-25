@@ -20,11 +20,44 @@ function getDb() {
   dbInstance.pragma('foreign_keys = ON');
   dbInstance.pragma('synchronous = NORMAL');
 
+  // Non-destructive column migrations (runs before schema indexes)
+  try {
+    const tableNames = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((t) => t.name);
+    if (tableNames.includes('customers')) {
+      const customerCols = dbInstance.pragma('table_info(customers)').map((c) => c.name);
+      if (!customerCols.includes('deleted_at')) {
+        dbInstance.exec('ALTER TABLE customers ADD COLUMN deleted_at TEXT DEFAULT NULL;');
+      }
+    }
+
+    if (tableNames.includes('entry_medicine')) {
+      const medCols = dbInstance.pragma('table_info(entry_medicine)').map((c) => c.name);
+      if (!medCols.includes('discount_percent')) {
+        dbInstance.exec('ALTER TABLE entry_medicine ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0;');
+      }
+      if (!medCols.includes('original_price')) {
+        dbInstance.exec('ALTER TABLE entry_medicine ADD COLUMN original_price REAL DEFAULT NULL;');
+      }
+    }
+  } catch (migErr) {
+    console.warn('[Pre-migration notice]:', migErr.message);
+  }
+
   // Initialize schema
   const schemaPath = path.join(__dirname, 'schema.sql');
   if (fs.existsSync(schemaPath)) {
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     dbInstance.exec(schemaSql);
+  }
+
+  // Ensure shop_profile exists and has row 1
+  try {
+    dbInstance.exec(`
+      INSERT OR IGNORE INTO shop_profile (id, shop_name, license_20b, license_21b, shop_license_validity, shop_phone, pharmacist_name, pharmacist_phone, pharmacist_license_validity)
+      VALUES (1, 'MedTrack Pharmacy', 'AP/NZB/20B/2024-9871', 'AP/NZB/21B/2024-9872', '2028-12-31', '9848012345', 'R. Venkata Charan', '9493972442', '2029-06-30');
+    `);
+  } catch (profErr) {
+    console.warn('[Shop profile seed notice]:', profErr.message);
   }
 
   return dbInstance;
@@ -113,17 +146,21 @@ function addEntry({ customerId, totalAmount, amountPaid, medicines, entryDate })
 
     // 3. Insert line items into entry_medicine
     const insertMedStmt = db.prepare(`
-      INSERT INTO entry_medicine (entry_id, medicine_name, price)
-      VALUES (?, ?, ?)
+      INSERT INTO entry_medicine (entry_id, medicine_name, price, discount_percent, original_price)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     const insertedMeds = [];
     for (const med of medicines) {
       const name = (med.name || med.medicine_name || '').trim();
       if (!name) continue;
-      const price = Math.round(parseFloat(med.price || 0) * 100) / 100;
-      insertMedStmt.run(entryId, name, price);
-      insertedMeds.push({ medicine_name: name, price });
+      const rawPrice = Math.round(parseFloat(med.original_price ?? med.price ?? 0) * 100) / 100;
+      const discount = Math.min(100, Math.max(0, parseFloat(med.discount_percent || 0) || 0));
+      // Net price = price - (price * discount / 100), clamped between 0 and rawPrice
+      const netPrice = Math.max(0, Math.min(rawPrice, Math.round((rawPrice - (rawPrice * discount / 100)) * 100) / 100));
+
+      insertMedStmt.run(entryId, name, netPrice, discount, rawPrice);
+      insertedMeds.push({ medicine_name: name, price: netPrice, discount_percent: discount, original_price: rawPrice });
     }
 
     if (insertedMeds.length === 0) {
@@ -272,12 +309,164 @@ function autocompleteMedicines(query) {
   `).all(`%${q}%`).map((r) => r.medicine_name);
 }
 
+/**
+ * Soft delete a customer: marks deleted_at timestamp
+ */
+function softDeleteCustomer(customerId) {
+  const db = getDb();
+  const customer = db.prepare('SELECT * FROM customers WHERE customer_id = ?').get(customerId);
+  if (!customer) {
+    throw new Error('Customer not found');
+  }
+
+  const result = db.prepare(`
+    UPDATE customers
+    SET deleted_at = datetime('now'), updated_at = datetime('now')
+    WHERE customer_id = ?
+  `).run(customerId);
+
+  return { success: result.changes > 0, customerId };
+}
+
+/**
+ * Restore a soft-deleted customer
+ */
+function restoreCustomer(customerId) {
+  const db = getDb();
+  const customer = db.prepare('SELECT * FROM customers WHERE customer_id = ?').get(customerId);
+  if (!customer) {
+    throw new Error('Customer not found');
+  }
+
+  const result = db.prepare(`
+    UPDATE customers
+    SET deleted_at = NULL, updated_at = datetime('now')
+    WHERE customer_id = ?
+  `).run(customerId);
+
+  return { success: result.changes > 0, customerId };
+}
+
+/**
+ * Permanent hard delete a customer and cascades all ledger data
+ */
+function permanentDeleteCustomer(customerId) {
+  const db = getDb();
+  const customer = db.prepare('SELECT * FROM customers WHERE customer_id = ?').get(customerId);
+  if (!customer) {
+    throw new Error('Customer not found');
+  }
+
+  const tx = db.transaction(() => {
+    // 1. Delete all entry_medicines
+    const entries = db.prepare('SELECT entry_id FROM entries WHERE customer_id = ?').all(customerId);
+    const entryIds = entries.map((e) => e.entry_id);
+
+    if (entryIds.length > 0) {
+      const placeholders = entryIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM entry_medicine WHERE entry_id IN (${placeholders})`).run(...entryIds);
+    }
+
+    // 2. Delete entries
+    db.prepare('DELETE FROM entries WHERE customer_id = ?').run(customerId);
+
+    // 3. Delete payments
+    db.prepare('DELETE FROM payments WHERE customer_id = ?').run(customerId);
+
+    // 4. Delete customer
+    db.prepare('DELETE FROM customers WHERE customer_id = ?').run(customerId);
+
+    return { success: true, customerId };
+  });
+
+  return tx();
+}
+
+/**
+ * Retrieve all soft-deleted customers for Recycle Bin
+ */
+function getDeletedCustomers() {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT customer_id, phone_number, name, village, address, deleted_at, created_at, updated_at
+    FROM customers
+    WHERE deleted_at IS NOT NULL
+    ORDER BY deleted_at DESC
+  `).all();
+
+  return rows.map((c) => ({
+    ...c,
+    total_due: getCustomerDue(c.customer_id),
+  }));
+}
+
+/**
+ * Get shop profile
+ */
+function getShopProfile() {
+  const db = getDb();
+  const profile = db.prepare('SELECT * FROM shop_profile WHERE id = 1').get();
+  return (
+    profile || {
+      id: 1,
+      shop_name: 'MedTrack Pharmacy',
+      license_20b: '',
+      license_21b: '',
+      shop_license_validity: '',
+      shop_phone: '',
+      pharmacist_name: '',
+      pharmacist_phone: '',
+      pharmacist_license_validity: '',
+    }
+  );
+}
+
+/**
+ * Update shop profile
+ */
+function updateShopProfile(data) {
+  const db = getDb();
+  const updateStmt = db.prepare(`
+    UPDATE shop_profile
+    SET
+      shop_name = COALESCE(?, shop_name),
+      license_20b = ?,
+      license_21b = ?,
+      shop_license_validity = ?,
+      shop_phone = ?,
+      pharmacist_name = ?,
+      pharmacist_phone = ?,
+      pharmacist_license_validity = ?,
+      updated_at = datetime('now')
+    WHERE id = 1
+  `);
+
+  updateStmt.run(
+    data.shop_name ? data.shop_name.trim() : 'MedTrack Pharmacy',
+    data.license_20b ? data.license_20b.trim() : null,
+    data.license_21b ? data.license_21b.trim() : null,
+    data.shop_license_validity ? data.shop_license_validity.trim() : null,
+    data.shop_phone ? data.shop_phone.trim() : null,
+    data.pharmacist_name ? data.pharmacist_name.trim() : null,
+    data.pharmacist_phone ? data.pharmacist_phone.trim() : null,
+    data.pharmacist_license_validity ? data.pharmacist_license_validity.trim() : null
+  );
+
+  return getShopProfile();
+}
+
 module.exports = {
   getDb,
   closeDb,
   getCustomerDue,
   addEntry,
   recordPayment,
+  softDeleteCustomer,
+  restoreCustomer,
+  permanentDeleteCustomer,
+  getDeletedCustomers,
+  getShopProfile,
+  updateShopProfile,
   getCustomerStats,
   autocompleteMedicines,
 };

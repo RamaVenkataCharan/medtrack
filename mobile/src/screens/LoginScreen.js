@@ -10,54 +10,42 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthService } from '../services/authService';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 
 export default function LoginScreen({ navigation, onLoginSuccess }) {
-  const [step, setStep] = useState('phone'); // 'phone' | 'otp'
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const insets = useSafeAreaInsets();
+  const [step, setStep] = useState('email'); // 'email' | 'otp'
+  const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [otpSent, setOtpSent] = useState(false);
 
-  // Format phone number with +91 country prefix
-  function getFormattedPhone() {
-    const clean = phoneNumber.replace(/\D/g, '');
-    if (clean.length === 10) {
-      return `+91${clean}`;
-    }
-    if (clean.length > 10 && clean.startsWith('91')) {
-      return `+${clean}`;
-    }
-    return `+91${clean}`;
-  }
-
-  // 1️⃣ SEND OTP
+  // 1️⃣ SEND EMAIL OTP
   async function handleSendOTP() {
     setError('');
-    const cleanDigits = phoneNumber.replace(/\D/g, '');
+    const cleanEmail = (email || '').trim().toLowerCase();
 
-    if (!cleanDigits || cleanDigits.length < 10) {
-      setError('Please enter a valid 10-digit mobile number');
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Please enter a valid email address');
       return;
     }
 
     setLoading(true);
-    const formatted = getFormattedPhone();
 
     try {
-      const result = await AuthService.sendOTP(formatted);
+      const result = await AuthService.sendEmailOTP(cleanEmail);
       if (result.success) {
         setOtpSent(true);
         setStep('otp');
-        Alert.alert('✅ OTP Sent', `A verification code was sent to ${formatted}`);
+        Alert.alert('✅ OTP Sent', `A verification code was sent to ${cleanEmail}`);
       } else {
-        setError(result.message || 'Failed to send OTP. Please check the number.');
+        setError(result.message || 'Failed to send OTP. Please check the email.');
       }
     } catch (err) {
       setError(err.message || 'An unexpected error occurred');
@@ -66,7 +54,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
     }
   }
 
-  // 2️⃣ VERIFY OTP
+  // 2️⃣ VERIFY EMAIL OTP
   async function handleVerifyOTP() {
     setError('');
     const cleanOtp = otp.trim();
@@ -77,10 +65,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
     }
 
     setLoading(true);
-    const formatted = getFormattedPhone();
+    const cleanEmail = (email || '').trim().toLowerCase();
 
     try {
-      const result = await AuthService.verifyOTP(formatted, cleanOtp);
+      const result = await AuthService.verifyEmailOTP(cleanEmail, cleanOtp);
       if (result.success) {
         if (onLoginSuccess) {
           onLoginSuccess(result.user);
@@ -97,8 +85,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
     }
   }
 
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.md;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -116,11 +106,11 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
 
           {/* Form Card */}
           <View style={styles.card}>
-            {step === 'phone' ? (
+            {step === 'email' ? (
               <>
                 <Text style={styles.cardTitle}>Pharmacist Login</Text>
                 <Text style={styles.cardSubtitle}>
-                  Enter your 10-digit mobile number to access store ledger and cloud backup.
+                  Enter your email address to access store ledger and cloud backup.
                 </Text>
 
                 {error ? (
@@ -130,20 +120,21 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   </View>
                 ) : null}
 
-                <Text style={styles.inputLabel}>Mobile Number</Text>
+                <Text style={styles.inputLabel}>Pharmacist Email Address</Text>
                 <View style={styles.phoneInputRow}>
                   <View style={styles.countryCodeBadge}>
-                    <Text style={styles.countryCodeText}>🇮🇳 +91</Text>
+                    <Ionicons name="mail-outline" size={18} color={COLORS.primary} />
                   </View>
                   <TextInput
                     style={styles.phoneInput}
-                    placeholder="98765 43210"
+                    placeholder="pharmacist@medical.com"
                     placeholderTextColor={COLORS.textTertiary}
-                    keyboardType="phone-pad"
-                    maxLength={10}
-                    value={phoneNumber}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    value={email}
                     onChangeText={(val) => {
-                      setPhoneNumber(val);
+                      setEmail(val);
                       if (error) setError('');
                     }}
                     editable={!loading}
@@ -187,23 +178,23 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   activeOpacity={0.8}
                 >
                   <Ionicons name="flash" size={16} color={COLORS.primary} />
-                  <Text style={styles.demoButtonText}>⚡ 1-Tap Quick Demo Login</Text>
+                  <Text style={styles.demoButtonText}>⚡ 1-Tap Quick Demo Login (demo@medtrack.com)</Text>
                 </TouchableOpacity>
 
                 <View style={styles.hintContainer}>
                   <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.textSecondary} />
-                  <Text style={styles.hintText}> Test Credentials: 9876543210 • OTP: 000000</Text>
+                  <Text style={styles.hintText}> Test Mode: demo@medtrack.com • OTP: 123456</Text>
                 </View>
               </>
             ) : (
               <>
-                <Text style={styles.cardTitle}>Verify OTP</Text>
+                <Text style={styles.cardTitle}>Verify Email OTP</Text>
                 <Text style={styles.cardSubtitle}>
                   Enter the 6-digit verification code sent to{' '}
-                  <Text style={styles.phoneHighlight}>{getFormattedPhone()}</Text>
+                  <Text style={styles.phoneHighlight}>{email}</Text>
                   {'\n'}
                   <Text style={{ fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' }}>
-                    💡 Test Mode: Use OTP <Text style={{ fontWeight: 'bold', color: COLORS.primary }}>000000</Text> or <Text style={{ fontWeight: 'bold', color: COLORS.primary }}>123456</Text>
+                    💡 Test Mode: Use OTP <Text style={{ fontWeight: 'bold', color: COLORS.primary }}>123456</Text> or <Text style={{ fontWeight: 'bold', color: COLORS.primary }}>000000</Text>
                   </Text>
                 </Text>
 
@@ -249,14 +240,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 <View style={styles.otpActionsRow}>
                   <TouchableOpacity
                     onPress={() => {
-                      setStep('phone');
+                      setStep('email');
                       setOtp('');
                       setError('');
                     }}
                     style={styles.changePhoneButton}
                   >
                     <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
-                    <Text style={styles.changePhoneText}> Change Number</Text>
+                    <Text style={styles.changePhoneText}> Change Email</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity onPress={handleSendOTP} disabled={loading}>
@@ -268,7 +259,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

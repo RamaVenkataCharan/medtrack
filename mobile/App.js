@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+
+// Suppress dev warning banners from user-facing screens
+LogBox.ignoreLogs([
+  'SafeAreaView has been deprecated',
+  'SafeAreaView',
+]);
+LogBox.ignoreAllLogs(true);
 
 import { initDatabase } from './src/db/database';
 import { COLORS } from './src/constants/theme';
@@ -14,6 +22,7 @@ import CustomerProfileScreen from './src/screens/CustomerProfileScreen';
 import AddPurchaseScreen from './src/screens/AddPurchaseScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import RecycleBinScreen from './src/screens/RecycleBinScreen';
+import UserProfileScreen from './src/screens/UserProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -58,37 +67,40 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <StatusBar style="dark" backgroundColor={COLORS.background} />
-      <Stack.Navigator
-        initialRouteName={session ? 'Home' : 'Login'}
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: COLORS.background },
-          animation: 'slide_from_right',
-        }}
-      >
-        {session ? (
-          <>
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
-            <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} />
-            <Stack.Screen name="AddPurchase" component={AddPurchaseScreen} />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
-            <Stack.Screen name="RecycleBin" component={RecycleBinScreen} />
-          </>
-        ) : (
-          <Stack.Screen name="Login">
-            {(props) => (
-              <LoginScreen
-                {...props}
-                onLoginSuccess={(user) => setSession({ user })}
-              />
-            )}
-          </Stack.Screen>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <StatusBar style="dark" backgroundColor={COLORS.background} />
+        <Stack.Navigator
+          initialRouteName={session ? 'Home' : 'Login'}
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: COLORS.background },
+            animation: 'slide_from_right',
+          }}
+        >
+          {session ? (
+            <>
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
+              <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} />
+              <Stack.Screen name="AddPurchase" component={AddPurchaseScreen} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="RecycleBin" component={RecycleBinScreen} />
+              <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+            </>
+          ) : (
+            <Stack.Screen name="Login">
+              {(props) => (
+                <LoginScreen
+                  {...props}
+                  onLoginSuccess={(user) => setSession({ user })}
+                />
+              )}
+            </Stack.Screen>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
 

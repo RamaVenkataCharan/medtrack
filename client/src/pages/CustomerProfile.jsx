@@ -8,11 +8,14 @@ import {
   Clock,
   ArrowRight,
   TrendingUp,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import CustomerCard from '../components/CustomerCard';
 import EntryList from '../components/EntryList';
 import EntryForm from '../components/EntryForm';
 import PaymentForm from '../components/PaymentForm';
+import Modal from '../components/Modal';
 import { api } from '../utils/api';
 import { useToast } from '../components/Toast';
 import { formatDate, formatCurrency } from '../utils/formatting';
@@ -37,6 +40,8 @@ export default function CustomerProfile({ customerId, onBackToSearch }) {
   // Modals
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchCustomerData = async () => {
     try {
@@ -144,6 +149,7 @@ export default function CustomerProfile({ customerId, onBackToSearch }) {
         onAddPurchase={() => setIsEntryModalOpen(true)}
         onCollectPayment={() => setIsPaymentModalOpen(true)}
         onBackToSearch={onBackToSearch}
+        onDeleteCustomer={() => setIsDeleteModalOpen(true)}
       />
 
       {/* Profile Section Tabs */}
@@ -309,6 +315,66 @@ export default function CustomerProfile({ customerId, onBackToSearch }) {
         customer={customer}
         onSuccess={handlePaymentSuccess}
       />
+
+      {/* Soft Delete Customer Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <Modal
+          isOpen={isDeleteModalOpen}
+          onClose={() => setIsDeleteModalOpen(false)}
+          title="Move Customer to Recycle Bin?"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-sm">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-slate-900">
+                  Are you sure you want to delete "{customer.name}"?
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
+                  They will be moved to the Recycle Bin and hidden from normal search. You can restore them anytime from the Recycle Bin.
+                </p>
+                {Number(customer.total_due || 0) > 0 && (
+                  <div className="mt-2.5 p-2.5 bg-amber-100/70 border border-amber-300 rounded-lg text-amber-950 font-medium text-xs">
+                    ⚠️ Warning: {customer.name} currently has an unpaid balance of ₹{Number(customer.total_due).toFixed(2)}.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsDeleting(true);
+                  try {
+                    await api.softDeleteCustomer(customer.customer_id);
+                    addToast('success', `Moved "${customer.name}" to Recycle Bin`);
+                    setIsDeleteModalOpen(false);
+                    onBackToSearch();
+                  } catch (err) {
+                    addToast('error', err.message || 'Failed to move customer to Recycle Bin');
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm shadow-rose-200 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                {isDeleting ? 'Moving...' : 'Move to Recycle Bin'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

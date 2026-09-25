@@ -5,18 +5,20 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getDeletedCustomers, restoreCustomer, permanentDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
+import { APIService } from '../services/apiService';
 
 export default function RecycleBinScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [deletedCustomers, setDeletedCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -40,6 +42,7 @@ export default function RecycleBinScreen({ navigation }) {
   const handleRestore = (item) => {
     try {
       restoreCustomer(item.customer_id);
+      APIService.restoreCustomer(item.customer_id).catch((e) => console.warn('Sync restore error:', e));
       Alert.alert('Customer Restored', `"${item.name}" has been restored to the active customer list.`);
       loadData();
     } catch (err) {
@@ -59,6 +62,7 @@ export default function RecycleBinScreen({ navigation }) {
           onPress: () => {
             try {
               permanentDeleteCustomer(item.customer_id);
+              APIService.makeRequest(`/api/customers/${item.customer_id}/permanent`, 'DELETE').catch((e) => console.warn('Sync permanent delete error:', e));
               Alert.alert('Deleted', `"${item.name}" and all associated data have been permanently removed.`);
               loadData();
             } catch (err) {
@@ -128,8 +132,10 @@ export default function RecycleBinScreen({ navigation }) {
     );
   };
 
+  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
       {/* Navigation Header */}
@@ -172,7 +178,7 @@ export default function RecycleBinScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

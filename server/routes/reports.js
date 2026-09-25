@@ -33,6 +33,7 @@ router.get('/dues', (req, res) => {
           WHERE p.customer_id = c.customer_id
         ) AS last_payment
       FROM customers c
+      WHERE c.deleted_at IS NULL
     `).all();
 
     // Compute derived total_due for each debtor
