@@ -142,6 +142,24 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={styles.iconActionBtn}
+            onPress={() => navigation.navigate('RecycleBin')}
+            accessibilityLabel="Recycle Bin"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="trash-bin-outline" size={17} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.iconActionBtn}
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityLabel="Settings"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={17} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={styles.logoutButton}
             onPress={handleLogout}
             accessibilityLabel="Logout"
@@ -245,6 +263,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.xs + 2,
+  },
+  iconActionBtn: {
+    padding: SPACING.xs + 3,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   logoutButton: {
     padding: SPACING.xs + 3,

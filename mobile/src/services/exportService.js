@@ -22,8 +22,14 @@ export async function exportKhataBackup() {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        Alert.alert('Backup Exported', `Downloaded ${fileName} (${data.customers?.length || 0} customers)`);
-        return { success: true, count: data.customers?.length };
+        const total = data.totalCustomers || data.customers?.length || 0;
+        const active = data.activeCustomers ?? total;
+        const deleted = data.deletedCustomers ?? 0;
+        Alert.alert(
+          'Backup Exported',
+          `Exported ${fileName}\n\nTotal: ${total} customers (${active} active, ${deleted} in Recycle Bin).`
+        );
+        return { success: true, count: total };
       }
     }
 
@@ -47,11 +53,13 @@ export async function exportKhataBackup() {
         dialogTitle: 'Export MedTrack Khata Backup',
         UTI: 'public.json',
       });
-      return { success: true, count: data.customers?.length };
+      const total = data.totalCustomers || data.customers?.length || 0;
+      return { success: true, count: total };
     } else {
+      const total = data.totalCustomers || data.customers?.length || 0;
       Alert.alert(
         'Backup Created',
-        `Backup file written to:\n${filePath}\n(Sharing is not supported on this device).`
+        `Backup file written to:\n${filePath}\n(${total} customers included).`
       );
       return { success: true, path: filePath };
     }

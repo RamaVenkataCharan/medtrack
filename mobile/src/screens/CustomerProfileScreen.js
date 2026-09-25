@@ -14,7 +14,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
-import { getCustomerById, getCustomerLedger, addDuePayment } from '../db/database';
+import { getCustomerById, getCustomerLedger, addDuePayment, softDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { isPaymentEntry } from '../utils/khataLogic';
 
@@ -70,6 +70,36 @@ export default function CustomerProfileScreen({ route, navigation }) {
     } finally {
       setSavingPayment(false);
     }
+  };
+
+  const handleDeleteCustomer = () => {
+    if (!customer) return;
+    const currentDue = parseFloat(customer.total_due || 0);
+
+    const dueWarning = currentDue > 0
+      ? `\n\n⚠️ Warning: ${customer.name} currently has an unpaid balance of ₹${currentDue.toFixed(2)}.`
+      : '';
+
+    Alert.alert(
+      'Move to Recycle Bin?',
+      `Are you sure you want to move "${customer.name}" to the Recycle Bin?${dueWarning}\n\nThey will be removed from normal search, and can be restored anytime from the Recycle Bin.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Move to Recycle Bin',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              softDeleteCustomer(customerId);
+              Alert.alert('Moved to Recycle Bin', `"${customer.name}" was moved to the Recycle Bin.`);
+              navigation.goBack();
+            } catch (err) {
+              Alert.alert('Delete Failed', err.message || 'Could not move customer to Recycle Bin.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading || !customer) {
@@ -156,12 +186,25 @@ export default function CustomerProfileScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       {/* Top Header */}
       <View style={styles.navBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.navTitle} numberOfLines={1}>
           {customer.name}
         </Text>
+        <TouchableOpacity
+          onPress={handleDeleteCustomer}
+          style={styles.deleteBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Delete Customer"
+          activeOpacity={0.7}
+        >
+          <Ionicons name="trash-outline" size={19} color={COLORS.danger} />
+        </TouchableOpacity>
       </View>
 
       {/* Customer Header Index-Card */}
@@ -308,6 +351,16 @@ const styles = StyleSheet.create({
   navTitle: {
     ...FONTS.header,
     flex: 1,
+    marginRight: SPACING.sm,
+  },
+  deleteBtn: {
+    padding: SPACING.xs + 3,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.dangerLight,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   customerHeaderCard: {
     backgroundColor: COLORS.surface,

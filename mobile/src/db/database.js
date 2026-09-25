@@ -31,7 +31,8 @@ function initNativeDatabase() {
       name TEXT NOT NULL,
       village TEXT,
       address TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      deleted_at TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS entries (
@@ -50,10 +51,37 @@ function initNativeDatabase() {
       price REAL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS shop_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      shop_name TEXT DEFAULT '',
+      shop_license_no TEXT DEFAULT '',
+      shop_license_validity TEXT DEFAULT '',
+      shop_phone TEXT DEFAULT '',
+      pharmacist_name TEXT DEFAULT '',
+      pharmacist_phone TEXT DEFAULT '',
+      pharmacist_license_validity TEXT DEFAULT '',
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    INSERT OR IGNORE INTO shop_profile (id) VALUES (1);
+
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone_number);
+    CREATE INDEX IF NOT EXISTS idx_customers_deleted ON customers(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
     CREATE INDEX IF NOT EXISTS idx_entry_meds_entry ON entry_medicines(entry_id);
   `);
+
+  // Non-destructive migration: guarantee deleted_at column exists for pre-existing databases
+  try {
+    const tableInfo = db.getAllSync(`PRAGMA table_info(customers);`);
+    const hasDeletedAt = tableInfo.some((col) => col.name === 'deleted_at');
+    if (!hasDeletedAt) {
+      db.execSync(`ALTER TABLE customers ADD COLUMN deleted_at TEXT DEFAULT NULL;`);
+      console.log('[MedTrack] Migration: added deleted_at column to customers');
+    }
+  } catch (err) {
+    console.warn('[MedTrack] Migration notice for deleted_at:', err.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -64,7 +92,27 @@ const WEB_STORAGE_KEY = 'medtrack_web_db_v1';
 function getWebState() {
   try {
     const raw = typeof window !== 'undefined' ? window.localStorage.getItem(WEB_STORAGE_KEY) : null;
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (!parsed.shop_profile) {
+        parsed.shop_profile = {
+          id: 1,
+          shop_name: '',
+          shop_license_no: '',
+          shop_license_validity: '',
+          shop_phone: '',
+          pharmacist_name: '',
+          pharmacist_phone: '',
+          pharmacist_license_validity: '',
+        };
+      }
+      if (Array.isArray(parsed.customers)) {
+        parsed.customers.forEach((c) => {
+          if (c.deleted_at === undefined) c.deleted_at = null;
+        });
+      }
+      return parsed;
+    }
   } catch (e) {
     console.warn('Could not read web localStorage:', e);
   }
@@ -72,6 +120,16 @@ function getWebState() {
     customers: [],
     entries: [],
     entry_medicines: [],
+    shop_profile: {
+      id: 1,
+      shop_name: '',
+      shop_license_no: '',
+      shop_license_validity: '',
+      shop_phone: '',
+      pharmacist_name: '',
+      pharmacist_phone: '',
+      pharmacist_license_validity: '',
+    },
     nextCustomerId: 1,
     nextEntryId: 1,
     nextMedicineId: 1,
@@ -109,12 +167,18 @@ export function initDatabase() {
   initNativeDatabase();
 }
 
+/**
+ * Searches and lists active customers (excludes soft-deleted customers)
+ */
 export function searchCustomers(query = '') {
   if (Platform.OS === 'web') {
     const state = getWebState();
     const trimmed = query.trim().toLowerCase();
 
-    const results = state.customers.map((c) => {
+    // EXCLUDE soft-deleted customers
+    const activeCustomers = state.customers.filter((c) => !c.deleted_at);
+
+    const results = activeCustomers.map((c) => {
       const customerEntries = state.entries.filter((e) => e.customer_id === c.customer_id);
       const totalDue = calculateCustomerTotalDue(customerEntries);
       const lastEntry = customerEntries[customerEntries.length - 1];
@@ -149,10 +213,12 @@ export function searchCustomers(query = '') {
         c.village, 
         c.address, 
         c.created_at,
+        c.deleted_at,
         ROUND(COALESCE(SUM(e.due_amount), 0), 2) AS total_due,
         MAX(e.entry_date) AS last_activity
       FROM customers c
       LEFT JOIN entries e ON c.customer_id = e.customer_id
+      WHERE c.deleted_at IS NULL
       GROUP BY c.customer_id
       ORDER BY COALESCE(MAX(e.entry_date), c.created_at) DESC
       LIMIT 100;
@@ -168,11 +234,12 @@ export function searchCustomers(query = '') {
       c.village, 
       c.address, 
       c.created_at,
+      c.deleted_at,
       ROUND(COALESCE(SUM(e.due_amount), 0), 2) AS total_due,
       MAX(e.entry_date) AS last_activity
     FROM customers c
     LEFT JOIN entries e ON c.customer_id = e.customer_id
-    WHERE c.phone_number LIKE ? OR c.name LIKE ?
+    WHERE c.deleted_at IS NULL AND (c.phone_number LIKE ? OR c.name LIKE ?)
     GROUP BY c.customer_id
     ORDER BY c.name ASC
     LIMIT 50;
@@ -207,6 +274,7 @@ export function getCustomerById(customerId) {
       c.village, 
       c.address, 
       c.created_at,
+      c.deleted_at,
       ROUND(COALESCE(SUM(e.due_amount), 0), 2) AS total_due,
       COUNT(e.entry_id) AS total_entries
     FROM customers c
@@ -221,14 +289,14 @@ export function getCustomerByPhone(phoneNumber) {
 
   if (Platform.OS === 'web') {
     const state = getWebState();
-    return state.customers.find((c) => c.phone_number === cleaned) || null;
+    return state.customers.find((c) => c.phone_number === cleaned && !c.deleted_at) || null;
   }
 
   // Native expo-sqlite
   const db = getNativeDb();
   return db.getFirstSync(`
     SELECT * FROM customers 
-    WHERE phone_number = ? OR phone_number LIKE ?
+    WHERE (phone_number = ? OR phone_number LIKE ?) AND deleted_at IS NULL
     LIMIT 1;
   `, [cleaned, `%${cleaned}`]);
 }
@@ -246,6 +314,7 @@ export function addCustomer({ name, phone_number, village, address }) {
       village: village ? village.trim() : null,
       address: address ? address.trim() : null,
       created_at: now,
+      deleted_at: null,
     };
     state.customers.push(newCustomer);
     saveWebState(state);
@@ -255,11 +324,158 @@ export function addCustomer({ name, phone_number, village, address }) {
   // Native expo-sqlite
   const db = getNativeDb();
   const result = db.runSync(`
-    INSERT INTO customers (phone_number, name, village, address, created_at)
-    VALUES (?, ?, ?, ?, ?);
+    INSERT INTO customers (phone_number, name, village, address, created_at, deleted_at)
+    VALUES (?, ?, ?, ?, ?, NULL);
   `, [cleanedPhone, name.trim(), village ? village.trim() : null, address ? address.trim() : null, now]);
 
   return result.lastInsertRowId;
+}
+
+/**
+ * ♻️ Soft-deletes a customer by setting deleted_at timestamp
+ */
+export function softDeleteCustomer(customerId) {
+  const numericId = parseInt(customerId, 10);
+  if (!numericId) return false;
+  const now = getCurrentLocalIso();
+
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    const cust = state.customers.find((c) => c.customer_id === numericId);
+    if (cust) {
+      cust.deleted_at = now;
+      saveWebState(state);
+      return true;
+    }
+    return false;
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  db.runSync(`UPDATE customers SET deleted_at = ? WHERE customer_id = ?;`, [now, numericId]);
+  return true;
+}
+
+/**
+ * ♻️ Restores a soft-deleted customer back to active state
+ */
+export function restoreCustomer(customerId) {
+  const numericId = parseInt(customerId, 10);
+  if (!numericId) return false;
+
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    const cust = state.customers.find((c) => c.customer_id === numericId);
+    if (cust) {
+      cust.deleted_at = null;
+      saveWebState(state);
+      return true;
+    }
+    return false;
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  db.runSync(`UPDATE customers SET deleted_at = NULL WHERE customer_id = ?;`, [numericId]);
+  return true;
+}
+
+/**
+ * 💥 Permanently hard-deletes a customer and cascades all entries & medicines
+ */
+export function permanentDeleteCustomer(customerId) {
+  const numericId = parseInt(customerId, 10);
+  if (!numericId) return false;
+
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    const customerEntries = state.entries.filter((e) => e.customer_id === numericId);
+    const entryIds = new Set(customerEntries.map((e) => e.entry_id));
+
+    state.entry_medicines = state.entry_medicines.filter((m) => !entryIds.has(m.entry_id));
+    state.entries = state.entries.filter((e) => e.customer_id !== numericId);
+    state.customers = state.customers.filter((c) => c.customer_id !== numericId);
+
+    saveWebState(state);
+    return true;
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  db.withTransactionSync(() => {
+    const entries = db.getAllSync(`SELECT entry_id FROM entries WHERE customer_id = ?;`, [numericId]);
+    const entryIds = entries.map((e) => e.entry_id);
+
+    if (entryIds.length > 0) {
+      const placeholders = entryIds.map(() => '?').join(',');
+      db.runSync(`DELETE FROM entry_medicines WHERE entry_id IN (${placeholders});`, entryIds);
+    }
+
+    db.runSync(`DELETE FROM entries WHERE customer_id = ?;`, [numericId]);
+    db.runSync(`DELETE FROM customers WHERE customer_id = ?;`, [numericId]);
+  });
+
+  return true;
+}
+
+/**
+ * Retrieves all soft-deleted customers for the Recycle Bin screen
+ */
+export function getDeletedCustomers() {
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    const deleted = state.customers.filter((c) => Boolean(c.deleted_at));
+
+    return deleted
+      .map((c) => {
+        const custEntries = state.entries.filter((e) => e.customer_id === c.customer_id);
+        const totalDue = calculateCustomerTotalDue(custEntries);
+        return {
+          ...c,
+          total_due: totalDue,
+          total_entries: custEntries.length,
+        };
+      })
+      .sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  return db.getAllSync(`
+    SELECT 
+      c.customer_id, 
+      c.phone_number, 
+      c.name, 
+      c.village, 
+      c.address, 
+      c.created_at,
+      c.deleted_at,
+      ROUND(COALESCE(SUM(e.due_amount), 0), 2) AS total_due,
+      COUNT(e.entry_id) AS total_entries
+    FROM customers c
+    LEFT JOIN entries e ON c.customer_id = e.customer_id
+    WHERE c.deleted_at IS NOT NULL
+    GROUP BY c.customer_id
+    ORDER BY c.deleted_at DESC;
+  `);
+}
+
+/**
+ * Returns count of soft-deleted customers
+ */
+export function getDeletedCustomerCount() {
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    return state.customers.filter((c) => Boolean(c.deleted_at)).length;
+  }
+
+  const db = getNativeDb();
+  try {
+    const row = db.getFirstSync(`SELECT COUNT(*) AS cnt FROM customers WHERE deleted_at IS NOT NULL;`);
+    return row ? row.cnt : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function getCustomerLedger(customerId) {
@@ -428,29 +644,140 @@ export function getPastMedicineNames() {
   return rows.map((r) => r.medicine_name);
 }
 
-export function exportAllData() {
+export function getShopProfile() {
+  const defaultProfile = {
+    id: 1,
+    shop_name: '',
+    shop_license_no: '',
+    shop_license_validity: '',
+    shop_phone: '',
+    pharmacist_name: '',
+    pharmacist_phone: '',
+    pharmacist_license_validity: '',
+  };
+
   if (Platform.OS === 'web') {
     const state = getWebState();
+    return { ...defaultProfile, ...(state.shop_profile || {}) };
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  try {
+    const row = db.getFirstSync(`SELECT * FROM shop_profile WHERE id = 1;`);
+    return row ? { ...defaultProfile, ...row } : defaultProfile;
+  } catch (e) {
+    console.warn('Could not read shop_profile from SQLite:', e);
+    return defaultProfile;
+  }
+}
+
+export function saveShopProfile(profile = {}) {
+  const sanitized = {
+    shop_name: (profile.shop_name || '').trim(),
+    shop_license_no: (profile.shop_license_no || '').trim(),
+    shop_license_validity: (profile.shop_license_validity || '').trim(),
+    shop_phone: (profile.shop_phone || '').trim(),
+    pharmacist_name: (profile.pharmacist_name || '').trim(),
+    pharmacist_phone: (profile.pharmacist_phone || '').trim(),
+    pharmacist_license_validity: (profile.pharmacist_license_validity || '').trim(),
+  };
+
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    state.shop_profile = {
+      id: 1,
+      ...sanitized,
+    };
+    saveWebState(state);
+    return state.shop_profile;
+  }
+
+  // Native expo-sqlite
+  const db = getNativeDb();
+  const now = getCurrentLocalIso();
+  db.runSync(`
+    INSERT INTO shop_profile (
+      id,
+      shop_name,
+      shop_license_no,
+      shop_license_validity,
+      shop_phone,
+      pharmacist_name,
+      pharmacist_phone,
+      pharmacist_license_validity,
+      updated_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      shop_name = excluded.shop_name,
+      shop_license_no = excluded.shop_license_no,
+      shop_license_validity = excluded.shop_license_validity,
+      shop_phone = excluded.shop_phone,
+      pharmacist_name = excluded.pharmacist_name,
+      pharmacist_phone = excluded.pharmacist_phone,
+      pharmacist_license_validity = excluded.pharmacist_license_validity,
+      updated_at = excluded.updated_at;
+  `, [
+    sanitized.shop_name,
+    sanitized.shop_license_no,
+    sanitized.shop_license_validity,
+    sanitized.shop_phone,
+    sanitized.pharmacist_name,
+    sanitized.pharmacist_phone,
+    sanitized.pharmacist_license_validity,
+    now,
+  ]);
+
+  return getShopProfile();
+}
+
+/**
+ * Exports all data, including soft-deleted customers clearly flagged with is_deleted and deleted_at
+ */
+export function exportAllData() {
+  const shopProfile = getShopProfile();
+
+  if (Platform.OS === 'web') {
+    const state = getWebState();
+    const formattedCustomers = state.customers.map((c) => ({
+      ...c,
+      is_deleted: Boolean(c.deleted_at),
+      deleted_at: c.deleted_at || null,
+    }));
+
     return {
       version: '1.0',
       exportedAt: getCurrentLocalIso(),
-      customers: state.customers,
+      totalCustomers: formattedCustomers.length,
+      activeCustomers: formattedCustomers.filter((c) => !c.is_deleted).length,
+      deletedCustomers: formattedCustomers.filter((c) => c.is_deleted).length,
+      customers: formattedCustomers,
       entries: state.entries,
       entryMedicines: state.entry_medicines,
+      shopProfile,
     };
   }
 
   // Native expo-sqlite
   const db = getNativeDb();
-  const customers = db.getAllSync(`SELECT * FROM customers ORDER BY customer_id ASC;`);
+  const rawCustomers = db.getAllSync(`SELECT * FROM customers ORDER BY customer_id ASC;`);
+  const formattedCustomers = rawCustomers.map((c) => ({
+    ...c,
+    is_deleted: Boolean(c.deleted_at),
+    deleted_at: c.deleted_at || null,
+  }));
   const entries = db.getAllSync(`SELECT * FROM entries ORDER BY entry_id ASC;`);
   const entryMedicines = db.getAllSync(`SELECT * FROM entry_medicines ORDER BY id ASC;`);
 
   return {
     version: '1.0',
     exportedAt: getCurrentLocalIso(),
-    customers,
+    totalCustomers: formattedCustomers.length,
+    activeCustomers: formattedCustomers.filter((c) => !c.is_deleted).length,
+    deletedCustomers: formattedCustomers.filter((c) => c.is_deleted).length,
+    customers: formattedCustomers,
     entries,
     entryMedicines,
+    shopProfile,
   };
 }
