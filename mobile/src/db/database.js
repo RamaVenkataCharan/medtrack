@@ -146,22 +146,81 @@ function getWebState() {
   } catch (e) {
     console.warn('Could not read web localStorage:', e);
   }
+  const initialDemoCustomers = [
+    {
+      customer_id: 1,
+      name: 'giri',
+      phone_number: '7894561230',
+      village: '',
+      address: '',
+      created_at: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+      deleted_at: null,
+    },
+    {
+      customer_id: 2,
+      name: 'charan',
+      phone_number: '9493972442',
+      village: 'nuzvid',
+      address: '',
+      created_at: new Date(Date.now() - 3600000 * 24 * 5).toISOString(),
+      deleted_at: null,
+    },
+    {
+      customer_id: 3,
+      name: 'Ramesh Kumar',
+      phone_number: '9876543210',
+      village: 'Nizampet',
+      address: 'Near Ramalayam Temple',
+      created_at: new Date(Date.now() - 3600000 * 24 * 10).toISOString(),
+      deleted_at: null,
+    },
+  ];
+
+  const initialDemoEntries = [
+    {
+      entry_id: 1,
+      customer_id: 1,
+      entry_date: new Date(Date.now() - 3600000 * 5).toISOString(),
+      total_amount: 50,
+      amount_paid: 35,
+      due_amount: 15,
+    },
+    {
+      entry_id: 2,
+      customer_id: 2,
+      entry_date: new Date(Date.now() - 3600000 * 12).toISOString(),
+      total_amount: 120,
+      amount_paid: 120,
+      due_amount: 0,
+    },
+    {
+      entry_id: 3,
+      customer_id: 3,
+      entry_date: new Date(Date.now() - 3600000 * 24).toISOString(),
+      total_amount: 80,
+      amount_paid: 80,
+      due_amount: 0,
+    },
+  ];
+
   return {
-    customers: [],
-    entries: [],
+    customers: initialDemoCustomers,
+    entries: initialDemoEntries,
     entry_medicines: [],
     shop_profile: {
       id: 1,
-      shop_name: '',
-      shop_license_no: '',
-      shop_license_validity: '',
-      shop_phone: '',
-      pharmacist_name: '',
-      pharmacist_phone: '',
-      pharmacist_license_validity: '',
+      shop_name: 'MedTrack Pharmacy',
+      shop_license_no: 'DL-20B-123456',
+      license_20b: 'DL-20B-123456',
+      license_21b: 'DL-21B-789012',
+      shop_license_validity: '2027-12-31',
+      shop_phone: '+919876543210',
+      pharmacist_name: 'Dr. Ramesh Kumar, B.Pharm',
+      pharmacist_phone: '+919848012345',
+      pharmacist_license_validity: '2027-10-15',
     },
-    nextCustomerId: 1,
-    nextEntryId: 1,
+    nextCustomerId: 4,
+    nextEntryId: 4,
     nextMedicineId: 1,
   };
 }

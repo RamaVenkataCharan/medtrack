@@ -202,15 +202,25 @@ export default function CustomerProfileScreen({ route, navigation }) {
         <Text style={styles.navTitle} numberOfLines={1}>
           {customer.name}
         </Text>
-        <TouchableOpacity
-          onPress={handleDeleteCustomer}
-          style={styles.deleteBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel="Delete Customer"
-          activeOpacity={0.7}
-        >
-          <Ionicons name="trash-outline" size={19} color={COLORS.danger} />
-        </TouchableOpacity>
+        <View style={styles.navActions}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('UserProfile')}
+            style={styles.headerSettingsBtn}
+            accessibilityLabel="Settings"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleDeleteCustomer}
+            style={styles.deleteBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Delete Customer"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="trash-outline" size={19} color={COLORS.danger} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Customer Header Index-Card */}
@@ -358,6 +368,21 @@ const styles = StyleSheet.create({
     ...FONTS.header,
     flex: 1,
     marginRight: SPACING.sm,
+  },
+  navActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerSettingsBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   deleteBtn: {
     padding: SPACING.xs + 3,

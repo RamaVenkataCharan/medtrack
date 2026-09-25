@@ -125,10 +125,13 @@ export default function HomeScreen({ navigation }) {
   };
 
   const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.sm;
-  const bottomFabPadding = Math.max(insets.bottom, SPACING.md) + SPACING.lg;
+  // Dynamic bottom clearance for 3-button nav and gesture bars:
+  // Android 3-button nav bar is ~48px; guarantee at least 48px base inset + 24px extra breathing room
+  const baseBottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 48 : 0);
+  const bottomFabPadding = Math.max(baseBottomInset, Platform.OS === 'android' ? 48 : 0) + 24;
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 24 : SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
       {/* Notebook Header */}
