@@ -41,6 +41,16 @@ async function safeSecureStoreDelete(key) {
 const DEMO_PHONES = ['+919876543210', '+919848012345', '+919999999999'];
 const VALID_TEST_OTPS = ['000000', '123456', '111111'];
 
+export function formatMockUUID(seed = '') {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const hex = Math.abs(hash).toString(16).padStart(12, '0').slice(-12);
+  return `00000000-0000-4000-8000-${hex}`;
+}
+
 export class AuthService {
   static listeners = new Set();
 
@@ -167,13 +177,14 @@ export class AuthService {
       // If test OTP was provided (000000, 123456) or test number
       if (VALID_TEST_OTPS.includes(cleanOtp) || DEMO_PHONES.includes(phoneNumber)) {
         const testUser = {
-          id: `pharmacist_${phoneNumber.replace(/\D/g, '')}`,
+          id: formatMockUUID(phoneNumber),
           phone: phoneNumber,
           role: 'pharmacist',
+          is_demo: true,
           app_metadata: { provider: 'phone' },
         };
         const testToken = `test_token_${Date.now()}`;
-        const mockSession = { user: testUser, access_token: testToken };
+        const mockSession = { user: testUser, access_token: testToken, is_demo: true };
 
         await safeSecureStoreSet('auth_token', testToken);
         await safeSecureStoreSet('demo_user', JSON.stringify(testUser));
@@ -311,13 +322,14 @@ export class AuthService {
 
       if (VALID_TEST_OTPS.includes(cleanOtp) || cleanEmail.includes('demo') || cleanEmail.includes('test')) {
         const testUser = {
-          id: `pharmacist_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          id: cleanEmail === 'demo@medtrack.com' ? '00000000-0000-0000-0000-000000000001' : formatMockUUID(cleanEmail),
           email: cleanEmail,
           role: 'pharmacist',
+          is_demo: true,
           app_metadata: { provider: 'email' },
         };
         const testToken = `test_token_${Date.now()}`;
-        const mockSession = { user: testUser, access_token: testToken };
+        const mockSession = { user: testUser, access_token: testToken, is_demo: true };
 
         await safeSecureStoreSet('auth_token', testToken);
         await safeSecureStoreSet('demo_user', JSON.stringify(testUser));

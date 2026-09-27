@@ -40,6 +40,18 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   const handleLogout = () => {
+    const doLogout = async () => {
+      await AuthService.logout();
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to log out?') : true;
+      if (confirmed) {
+        doLogout();
+      }
+      return;
+    }
+
     Alert.alert(
       'Logout',
       userPhone ? `Logged in as ${userPhone}.\nAre you sure you want to log out?` : 'Are you sure you want to log out?',
@@ -48,9 +60,7 @@ export default function HomeScreen({ navigation }) {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: async () => {
-            await AuthService.logout();
-          },
+          onPress: doLogout,
         },
       ]
     );

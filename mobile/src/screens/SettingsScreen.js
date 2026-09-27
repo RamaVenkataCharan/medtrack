@@ -56,6 +56,27 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const handleLogout = () => {
+    const doLogout = async () => {
+      try {
+        await AuthService.logout();
+        if (navigation.replace) {
+          navigation.replace('Login');
+        } else if (navigation.navigate) {
+          navigation.navigate('Login');
+        }
+      } catch (err) {
+        console.warn('Logout notice:', err);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to sign out of your store session?') : true;
+      if (confirmed) {
+        doLogout();
+      }
+      return;
+    }
+
     Alert.alert(
       'Sign Out',
       'Are you sure you want to securely sign out of your store session?',
@@ -64,13 +85,7 @@ export default function SettingsScreen({ navigation }) {
         {
           text: 'Sign Out',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await AuthService.logout();
-            } catch (err) {
-              console.warn('Logout notice:', err);
-            }
-          },
+          onPress: doLogout,
         },
       ]
     );
