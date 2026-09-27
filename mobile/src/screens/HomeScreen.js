@@ -19,6 +19,8 @@ import { searchCustomers, getActiveDriverName, getDeletedCustomerCount, softDele
 import { exportKhataBackup } from '../services/exportService';
 import { AuthService } from '../services/authService';
 import { APIService } from '../services/apiService';
+import { LocalMigrationService } from '../services/localMigrationService';
+import NetworkBanner from '../components/NetworkBanner';
 import CustomerCard from '../components/CustomerCard';
 
 export default function HomeScreen({ navigation }) {
@@ -55,10 +57,46 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  const loadData = useCallback(() => {
+  // Check for pre-existing local SQLite data to upload
+  useEffect(() => {
+    LocalMigrationService.checkPendingLocalData().then(({ hasData, count }) => {
+      if (hasData && count > 0) {
+        Alert.alert(
+          '📦 Local Khata Data Detected',
+          `Found ${count} customer record(s) stored on this device from before the cloud migration. Would you like to upload them to your MedTrack Cloud account now?`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Upload to Cloud',
+              onPress: async () => {
+                try {
+                  setLoading(true);
+                  const res = await LocalMigrationService.migrateToCloud();
+                  Alert.alert(
+                    '✅ Upload Complete',
+                    `Successfully migrated ${res.customersMigrated} customers and ${res.entriesMigrated} entries to MedTrack Cloud.`
+                  );
+                  loadData();
+                } catch (migErr) {
+                  Alert.alert('Upload Failed', migErr.message || 'Could not upload local data');
+                } finally {
+                  setLoading(false);
+                }
+              },
+            },
+          ]
+        );
+      }
+    });
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const results = searchCustomers(query);
-      setCustomers(results);
+      const results = await searchCustomers(query);
+      setCustomers(results || []);
+      const count = await getDeletedCustomerCount();
+      setDeletedCount(count || 0);
     } catch (e) {
       console.error('Error loading customers:', e);
     } finally {
@@ -99,11 +137,11 @@ export default function HomeScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              softDeleteCustomer(customer.customer_id);
+              await softDeleteCustomer(customer.customer_id);
               APIService.deleteCustomer(customer.customer_id).catch(() => {});
               Alert.alert('✅ Deleted', `"${customer.name}" moved to recycle bin`);
               loadData();
-              const count = getDeletedCustomerCount();
+              const count = await getDeletedCustomerCount();
               setDeletedCount(count);
             } catch (err) {
               Alert.alert('❌ Error', err.message || 'Failed to delete customer');
@@ -133,6 +171,7 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 24 : SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <NetworkBanner />
 
       {/* Notebook Header */}
       <View style={styles.header}>

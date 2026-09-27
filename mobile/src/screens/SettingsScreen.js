@@ -18,12 +18,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getShopProfile, saveShopProfile, getDeletedCustomerCount } from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
+import { LocalMigrationService } from '../services/localMigrationService';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [deletedCount, setDeletedCount] = useState(0);
 
   const [profile, setProfile] = useState({
@@ -47,9 +50,9 @@ export default function SettingsScreen({ navigation }) {
     return date < today;
   };
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     try {
-      const data = getShopProfile();
+      const data = await getShopProfile();
       if (data) {
         setProfile({
           shop_name: data.shop_name || '',
@@ -63,8 +66,8 @@ export default function SettingsScreen({ navigation }) {
           pharmacist_license_validity: data.pharmacist_license_validity || '',
         });
       }
-      const count = getDeletedCustomerCount();
-      setDeletedCount(count);
+      const count = await getDeletedCustomerCount();
+      setDeletedCount(count || 0);
     } catch (e) {
       console.warn('Could not load settings:', e);
     } finally {
@@ -82,15 +85,56 @@ export default function SettingsScreen({ navigation }) {
     setProfile((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
     try {
-      saveShopProfile(profile);
+      await saveShopProfile(profile);
       Alert.alert('Settings Saved', 'Shop & Pharmacist profile updated successfully.');
     } catch (e) {
       Alert.alert('Save Failed', e.message || 'Could not save profile.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleMigrateLocalData = async () => {
+    setMigrating(true);
+    try {
+      const check = await LocalMigrationService.checkPendingLocalData();
+      if (!check.hasData || check.count === 0) {
+        Alert.alert('No Local Data', 'No offline SQLite data found to upload, or data has already been migrated.');
+        return;
+      }
+
+      Alert.alert(
+        'Upload Local Data',
+        `Found ${check.count} local customer record(s). Upload to MedTrack Cloud under your account?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Upload',
+            onPress: async () => {
+              try {
+                setMigrating(true);
+                const res = await LocalMigrationService.migrateToCloud();
+                Alert.alert(
+                  'Upload Succeeded',
+                  `Successfully uploaded ${res.customersMigrated} customers and ${res.entriesMigrated} ledger entries to your MedTrack Cloud account.`
+                );
+                await loadData();
+              } catch (err) {
+                Alert.alert('Upload Failed', err.message || 'Could not upload data');
+              } finally {
+                setMigrating(false);
+              }
+            },
+          },
+        ]
+      );
+    } catch (err) {
+      Alert.alert('Error', err.message || 'Could not check local data');
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -131,6 +175,7 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
         <Text style={styles.navTitle}>Settings & Storage</Text>
       </View>
+      <NetworkBanner />
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {/* RECYCLE BIN CARD (Prominent) */}
@@ -179,6 +224,29 @@ export default function SettingsScreen({ navigation }) {
           </View>
           {exporting ? (
             <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textTertiary} />
+          )}
+        </TouchableOpacity>
+
+        {/* Action: Upload local SQLite data to cloud */}
+        <TouchableOpacity
+          style={[styles.recycleBinRow, { marginTop: SPACING.sm }]}
+          onPress={handleMigrateLocalData}
+          disabled={migrating}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.recycleIconWrap, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+            <Ionicons name="cloud-upload-outline" size={20} color="#2563EB" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.recycleTitle}>Upload Local Data to Cloud</Text>
+            <Text style={styles.recycleSubtitle}>
+              Sync pre-existing offline SQLite records into your MedTrack Cloud account
+            </Text>
+          </View>
+          {migrating ? (
+            <ActivityIndicator size="small" color="#2563EB" />
           ) : (
             <Ionicons name="chevron-forward" size={20} color={COLORS.textTertiary} />
           )}

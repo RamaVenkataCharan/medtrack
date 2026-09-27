@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { addCustomer, getCustomerByPhone } from '../db/database';
 import { cleanPhoneNumber } from '../utils/khataLogic';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function AddCustomerScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -28,7 +29,7 @@ export default function AddCustomerScreen({ navigation, route }) {
   const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmedName = name.trim();
     const cleanPhone = cleanPhoneNumber(phone);
 
@@ -45,7 +46,7 @@ export default function AddCustomerScreen({ navigation, route }) {
     setSaving(true);
     try {
       // 1. Check for existing customer by phone number
-      const existing = getCustomerByPhone(cleanPhone);
+      const existing = await getCustomerByPhone(cleanPhone);
       if (existing) {
         Alert.alert(
           'Customer Already Exists',
@@ -63,7 +64,7 @@ export default function AddCustomerScreen({ navigation, route }) {
       }
 
       // 2. Add new customer
-      const newId = addCustomer({
+      const newId = await addCustomer({
         name: trimmedName,
         phone_number: cleanPhone,
         village: village.trim(),
@@ -74,7 +75,7 @@ export default function AddCustomerScreen({ navigation, route }) {
       navigation.replace('CustomerProfile', { customerId: newId });
     } catch (err) {
       console.error('Error adding customer:', err);
-      Alert.alert('Error', 'Failed to save customer: ' + err.message);
+      Alert.alert('Error', 'Failed to save customer: ' + (err.message || 'Please check your connection'));
     } finally {
       setSaving(false);
     }
@@ -84,6 +85,7 @@ export default function AddCustomerScreen({ navigation, route }) {
 
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+      <NetworkBanner />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}

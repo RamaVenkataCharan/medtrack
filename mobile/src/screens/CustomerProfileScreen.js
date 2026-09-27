@@ -19,6 +19,7 @@ import { getCustomerById, getCustomerLedger, addDuePayment, softDeleteCustomer }
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { isPaymentEntry } from '../utils/khataLogic';
 import { APIService } from '../services/apiService';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function CustomerProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
@@ -33,12 +34,12 @@ export default function CustomerProfileScreen({ route, navigation }) {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
 
-  const loadProfile = useCallback(() => {
+  const loadProfile = useCallback(async () => {
     try {
-      const cust = getCustomerById(customerId);
-      const entries = getCustomerLedger(customerId);
+      const cust = await getCustomerById(customerId);
+      const entries = await getCustomerLedger(customerId);
       setCustomer(cust);
-      setLedger(entries);
+      setLedger(entries || []);
     } catch (err) {
       console.error('Error loading customer profile:', err);
     } finally {
@@ -52,7 +53,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
     }, [loadProfile])
   );
 
-  const handleRecordPayment = () => {
+  const handleRecordPayment = async () => {
     const amount = parseFloat(paymentAmount);
     if (!amount || amount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
@@ -61,15 +62,15 @@ export default function CustomerProfileScreen({ route, navigation }) {
 
     setSavingPayment(true);
     try {
-      addDuePayment({
+      await addDuePayment({
         customerId,
         amountPaid: amount,
       });
       setPaymentAmount('');
       setPayModalVisible(false);
-      loadProfile();
+      await loadProfile();
     } catch (e) {
-      Alert.alert('Error', 'Could not record payment: ' + e.message);
+      Alert.alert('Error', 'Could not record payment: ' + (e.message || 'Please check your connection'));
     } finally {
       setSavingPayment(false);
     }
@@ -93,7 +94,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              softDeleteCustomer(customerId);
+              await softDeleteCustomer(customerId);
               APIService.deleteCustomer(customerId).catch((e) => console.warn('Sync delete customer error:', e));
               Alert.alert('Moved to Recycle Bin', `"${customer.name}" was moved to the Recycle Bin.`);
               navigation.goBack();
@@ -190,6 +191,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+      <NetworkBanner />
       {/* Top Header */}
       <View style={styles.navBar}>
         <TouchableOpacity

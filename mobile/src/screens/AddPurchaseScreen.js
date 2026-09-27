@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { addPurchaseEntry, getPastMedicineNames } from '../db/database';
 import { calculateEntryDue, calculateLineTotal } from '../utils/khataLogic';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function AddPurchaseScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
@@ -30,12 +31,13 @@ export default function AddPurchaseScreen({ route, navigation }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    try {
-      const names = getPastMedicineNames();
-      setPastSuggestions(names);
-    } catch (e) {
-      console.warn('Could not load past medicine names:', e);
-    }
+    getPastMedicineNames()
+      .then((names) => {
+        if (Array.isArray(names)) setPastSuggestions(names);
+      })
+      .catch((e) => {
+        console.warn('Could not load past medicine names:', e);
+      });
   }, []);
 
   const addMedicineRow = () => {
@@ -79,7 +81,7 @@ export default function AddPurchaseScreen({ route, navigation }) {
   const parsedPaid = parseFloat(amountPaid) || 0;
   const calculatedDue = calculateEntryDue(calculatedTotal, parsedPaid);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Check if at least one medicine has a name or at least total > 0
     const validMeds = medicines
       .filter((m) => m.name.trim().length > 0)
@@ -102,7 +104,7 @@ export default function AddPurchaseScreen({ route, navigation }) {
 
     setSaving(true);
     try {
-      addPurchaseEntry({
+      await addPurchaseEntry({
         customerId,
         medicines: validMeds,
         totalAmount: calculatedTotal,
@@ -122,6 +124,7 @@ export default function AddPurchaseScreen({ route, navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+      <NetworkBanner />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}

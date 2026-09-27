@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthService } from '../services/authService';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function UserProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -136,6 +137,7 @@ export default function UserProfileScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <NetworkBanner />
 
       {/* Corporate App Bar */}
       <View style={styles.appBar}>

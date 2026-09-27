@@ -1,27 +1,24 @@
 # Dependencies
 node_modules/
-client/node_modules/
-server/node_modules/
+mobile/node_modules/
 
-# Production build
+# Production builds & Expo
 dist/
-client/dist/
+web-build/
+.expo/
 
-# SQLite database files & WAL
+# Database files
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.db
 *.backup
-server/db/*.sqlite
-server/db/*.sqlite-shm
-server/db/*.sqlite-wal
-server/export/
 
-# Environment variables
+# Environment variables & secrets
 .env
 .env.local
 .env.*.local
+mobile/.env
 
 # Logs
 logs/

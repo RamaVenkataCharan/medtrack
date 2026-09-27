@@ -6,7 +6,7 @@ import { exportAllData } from '../db/database';
  */
 export async function exportKhataBackup() {
   try {
-    const data = exportAllData();
+    const data = await exportAllData();
     const dateStamp = new Date().toISOString().split('T')[0];
     const fileName = `medtrack_backup_${dateStamp}.json`;
     const jsonString = JSON.stringify(data, null, 2);

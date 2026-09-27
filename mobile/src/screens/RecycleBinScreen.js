@@ -16,16 +16,17 @@ import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getDeletedCustomers, restoreCustomer, permanentDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { APIService } from '../services/apiService';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function RecycleBinScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [deletedCustomers, setDeletedCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     try {
-      const list = getDeletedCustomers();
-      setDeletedCustomers(list);
+      const list = await getDeletedCustomers();
+      setDeletedCustomers(list || []);
     } catch (err) {
       console.error('Error loading deleted customers:', err);
     } finally {
@@ -39,12 +40,12 @@ export default function RecycleBinScreen({ navigation }) {
     }, [loadData])
   );
 
-  const handleRestore = (item) => {
+  const handleRestore = async (item) => {
     try {
-      restoreCustomer(item.customer_id);
+      await restoreCustomer(item.customer_id);
       APIService.restoreCustomer(item.customer_id).catch((e) => console.warn('Sync restore error:', e));
       Alert.alert('Customer Restored', `"${item.name}" has been restored to the active customer list.`);
-      loadData();
+      await loadData();
     } catch (err) {
       Alert.alert('Restore Failed', err.message || 'Could not restore customer.');
     }
@@ -59,12 +60,12 @@ export default function RecycleBinScreen({ navigation }) {
         {
           text: 'Delete Permanently',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             try {
-              permanentDeleteCustomer(item.customer_id);
+              await permanentDeleteCustomer(item.customer_id);
               APIService.makeRequest(`/api/customers/${item.customer_id}/permanent`, 'DELETE').catch((e) => console.warn('Sync permanent delete error:', e));
               Alert.alert('Deleted', `"${item.name}" and all associated data have been permanently removed.`);
-              loadData();
+              await loadData();
             } catch (err) {
               Alert.alert('Delete Failed', err.message || 'Could not permanently delete customer.');
             }
@@ -137,6 +138,7 @@ export default function RecycleBinScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <NetworkBanner />
 
       {/* Navigation Header */}
       <View style={styles.navBar}>

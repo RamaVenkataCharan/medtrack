@@ -32,12 +32,13 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      initDatabase();
-      setDbReady(true);
-    } catch (err) {
-      console.error('Failed to initialize local SQLite database:', err);
-    }
+    Promise.resolve(initDatabase())
+      .catch((err) => {
+        console.warn('Database layer init notice:', err);
+      })
+      .finally(() => {
+        setDbReady(true);
+      });
 
     // Check for existing session on launch
     AuthService.getSession()
