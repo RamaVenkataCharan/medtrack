@@ -19,6 +19,7 @@ import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getShopProfile, saveShopProfile, getDeletedCustomerCount } from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
 import { LocalMigrationService } from '../services/localMigrationService';
+import { AuthService } from '../services/authService';
 import NetworkBanner from '../components/NetworkBanner';
 
 export default function SettingsScreen({ navigation }) {
@@ -41,13 +42,38 @@ export default function SettingsScreen({ navigation }) {
     pharmacist_license_validity: '',
   });
 
-  const isExpired = (dateStr) => {
-    if (!dateStr) return false;
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return false;
+  const getValidityBadge = (dateStr) => {
+    if (!dateStr) return null;
+    const expiryDate = new Date(dateStr);
+    if (isNaN(expiryDate.getTime())) return null;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return date < today;
+    const days = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+    return {
+      text: days < 0 ? `Expired (${Math.abs(days)}d ago)` : `Valid • ${days} days left`,
+      isValid: days >= 0,
+    };
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to securely sign out of your store session?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AuthService.logout();
+            } catch (err) {
+              console.warn('Logout notice:', err);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const loadData = useCallback(async () => {
@@ -152,8 +178,8 @@ export default function SettingsScreen({ navigation }) {
     );
   }
 
-  const shopExpired = isExpired(profile.shop_license_validity);
-  const pharmacistExpired = isExpired(profile.pharmacist_license_validity);
+  const shopBadge = getValidityBadge(profile.shop_license_validity);
+  const pharmacistBadge = getValidityBadge(profile.pharmacist_license_validity);
 
   const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
 
@@ -287,7 +313,14 @@ export default function SettingsScreen({ navigation }) {
 
           <View style={styles.labelRow}>
             <Text style={styles.inputLabel}>Shop License Validity</Text>
-            {shopExpired && <Text style={styles.expiredBadge}>(Expired)</Text>}
+            {shopBadge && (
+              <View style={[styles.validityBadge, shopBadge.isValid ? styles.validityBadgeValid : styles.validityBadgeExpired]}>
+                <View style={[styles.badgeDot, { backgroundColor: shopBadge.isValid ? COLORS.paymentGreen : COLORS.danger }]} />
+                <Text style={[styles.validityBadgeText, { color: shopBadge.isValid ? COLORS.paymentGreen : COLORS.danger }]}>
+                  {shopBadge.text}
+                </Text>
+              </View>
+            )}
           </View>
           <TextInput
             style={styles.input}
@@ -335,7 +368,14 @@ export default function SettingsScreen({ navigation }) {
 
           <View style={styles.labelRow}>
             <Text style={styles.inputLabel}>Pharmacist License Validity</Text>
-            {pharmacistExpired && <Text style={styles.expiredBadge}>(Expired)</Text>}
+            {pharmacistBadge && (
+              <View style={[styles.validityBadge, pharmacistBadge.isValid ? styles.validityBadgeValid : styles.validityBadgeExpired]}>
+                <View style={[styles.badgeDot, { backgroundColor: pharmacistBadge.isValid ? COLORS.paymentGreen : COLORS.danger }]} />
+                <Text style={[styles.validityBadgeText, { color: pharmacistBadge.isValid ? COLORS.paymentGreen : COLORS.danger }]}>
+                  {pharmacistBadge.text}
+                </Text>
+              </View>
+            )}
           </View>
           <TextInput
             style={styles.input}
@@ -361,6 +401,27 @@ export default function SettingsScreen({ navigation }) {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Statutory Compliance Assurance */}
+        <View style={styles.complianceNoticeBox}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.textSecondary} style={{ marginRight: 10, marginTop: 1 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.complianceTitle}>Statutory Compliance Assurance</Text>
+            <Text style={styles.complianceBody}>
+              Retail store records are maintained in conformity with the Drugs and Cosmetics Act, 1940 and Pharmacy Act, 1948.
+            </Text>
+          </View>
+        </View>
+
+        {/* Corporate Sign Out Button */}
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={handleLogout}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="log-out-outline" size={18} color={COLORS.danger} style={{ marginRight: 8 }} />
+          <Text style={styles.signOutBtnText}>Sign Out of Store Session</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -518,5 +579,70 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.65,
+  },
+  validityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADIUS.pill,
+  },
+  validityBadgeValid: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  validityBadgeExpired: {
+    backgroundColor: COLORS.dangerLight,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  badgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+  validityBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  complianceNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.md,
+    marginTop: SPACING.xl,
+  },
+  complianceTitle: {
+    ...FONTS.header,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  complianceBody: {
+    ...FONTS.bodySecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    color: COLORS.textSecondary,
+  },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: RADIUS.md,
+    paddingVertical: SPACING.md,
+    marginTop: SPACING.lg,
+  },
+  signOutBtnText: {
+    ...FONTS.body,
+    fontWeight: '600',
+    color: COLORS.danger,
   },
 });

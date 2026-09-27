@@ -18,7 +18,6 @@ import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { searchCustomers, getActiveDriverName, getDeletedCustomerCount, softDeleteCustomer } from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
 import { AuthService } from '../services/authService';
-import { APIService } from '../services/apiService';
 import { LocalMigrationService } from '../services/localMigrationService';
 import NetworkBanner from '../components/NetworkBanner';
 import CustomerCard from '../components/CustomerCard';
@@ -138,7 +137,6 @@ export default function HomeScreen({ navigation }) {
           onPress: async () => {
             try {
               await softDeleteCustomer(customer.customer_id);
-              APIService.deleteCustomer(customer.customer_id).catch(() => {});
               Alert.alert('✅ Deleted', `"${customer.name}" moved to recycle bin`);
               loadData();
               const count = await getDeletedCustomerCount();
@@ -217,7 +215,7 @@ export default function HomeScreen({ navigation }) {
           {/* Action 3: Settings Gear Icon */}
           <TouchableOpacity
             style={styles.headerIconBtn}
-            onPress={() => navigation.navigate('UserProfile')}
+            onPress={() => navigation.navigate('Settings')}
             accessibilityLabel="Settings"
             activeOpacity={0.7}
           >

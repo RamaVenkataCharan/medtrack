@@ -215,6 +215,12 @@ export async function addCustomer({ name, phone_number, village, address }) {
   return data.customer_id;
 }
 
+// TODO: The recycle bin's soft-delete, restore, and permanent-delete logic currently
+// has no automated test coverage against Supabase (the legacy test_sqlite_recycle_bin.js
+// was removed as it tested deprecated local SQLite infrastructure). Implement automated
+// integration test coverage for Supabase softDeleteCustomer, restoreCustomer, and
+// permanentDeleteCustomer with Row Level Security.
+
 /**
  * ♻️ Soft-deletes a customer by updating deleted_at timestamp
  */

@@ -18,7 +18,6 @@ import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getCustomerById, getCustomerLedger, addDuePayment, softDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { isPaymentEntry } from '../utils/khataLogic';
-import { APIService } from '../services/apiService';
 import NetworkBanner from '../components/NetworkBanner';
 
 export default function CustomerProfileScreen({ route, navigation }) {
@@ -95,7 +94,6 @@ export default function CustomerProfileScreen({ route, navigation }) {
           onPress: async () => {
             try {
               await softDeleteCustomer(customerId);
-              APIService.deleteCustomer(customerId).catch((e) => console.warn('Sync delete customer error:', e));
               Alert.alert('Moved to Recycle Bin', `"${customer.name}" was moved to the Recycle Bin.`);
               navigation.goBack();
             } catch (err) {
@@ -206,7 +204,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
         </Text>
         <View style={styles.navActions}>
           <TouchableOpacity
-            onPress={() => navigation.navigate('UserProfile')}
+            onPress={() => navigation.navigate('Settings')}
             style={styles.headerSettingsBtn}
             accessibilityLabel="Settings"
             activeOpacity={0.7}

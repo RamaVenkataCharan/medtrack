@@ -15,7 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
 import { getDeletedCustomers, restoreCustomer, permanentDeleteCustomer } from '../db/database';
 import { formatLocalDateTime } from '../utils/dateUtils';
-import { APIService } from '../services/apiService';
 import NetworkBanner from '../components/NetworkBanner';
 
 export default function RecycleBinScreen({ navigation }) {
@@ -43,7 +42,6 @@ export default function RecycleBinScreen({ navigation }) {
   const handleRestore = async (item) => {
     try {
       await restoreCustomer(item.customer_id);
-      APIService.restoreCustomer(item.customer_id).catch((e) => console.warn('Sync restore error:', e));
       Alert.alert('Customer Restored', `"${item.name}" has been restored to the active customer list.`);
       await loadData();
     } catch (err) {
@@ -63,7 +61,6 @@ export default function RecycleBinScreen({ navigation }) {
           onPress: async () => {
             try {
               await permanentDeleteCustomer(item.customer_id);
-              APIService.makeRequest(`/api/customers/${item.customer_id}/permanent`, 'DELETE').catch((e) => console.warn('Sync permanent delete error:', e));
               Alert.alert('Deleted', `"${item.name}" and all associated data have been permanently removed.`);
               await loadData();
             } catch (err) {

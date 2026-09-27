@@ -143,7 +143,7 @@ export default function AddPurchaseScreen({ route, navigation }) {
 
           <TouchableOpacity
             style={styles.headerIconBtn}
-            onPress={() => navigation.navigate('UserProfile')}
+            onPress={() => navigation.navigate('Settings')}
             accessibilityLabel="Settings"
             activeOpacity={0.7}
           >
