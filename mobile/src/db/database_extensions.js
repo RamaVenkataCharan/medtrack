@@ -5,9 +5,11 @@ import { AuthService } from '../services/authService';
 import { cleanPhoneNumber, calculateCustomerTotalDue } from '../utils/khataLogic';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { NotificationService } from '../services/notificationService';
 
-// Helper to check if current session is demo/test mode
+// Helper to check if current session is demo/test mode (strictly confined to development)
 async function isDemoSession() {
+  if (!Boolean(typeof __DEV__ !== 'undefined' && __DEV__)) return false;
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id && !session.user.is_demo) return false;
@@ -664,13 +666,18 @@ export async function addReminder({ title, due_date, notes }) {
   const userId = await getAuthUserId(false);
   const now = new Date();
   now.setHours(0, 0, 0, 0);
+
+  if (!due_date || isNaN(new Date(due_date).getTime())) {
+    throw new Error('Please enter a valid due date (YYYY-MM-DD).');
+  }
+
   const dDate = new Date(due_date);
-  const daysLeft = !isNaN(dDate.getTime()) ? Math.ceil((dDate - now) / (1000 * 60 * 60 * 24)) : 30;
+  const daysLeft = Math.ceil((dDate - now) / (1000 * 60 * 60 * 24));
 
   const newRem = {
     id: `rem_${Date.now()}`,
     title: (title || '').trim(),
-    due_date: due_date || getCurrentLocalIso().slice(0, 10),
+    due_date: due_date.trim(),
     notes: (notes || '').trim(),
     is_completed: false,
     type: 'custom',
@@ -683,5 +690,13 @@ export async function addReminder({ title, due_date, notes }) {
   const currentList = await loadPersistedReminders(userId);
   currentList.unshift(newRem);
   await savePersistedReminders(userId, currentList);
+
+  // Schedule system notification if future date
+  try {
+    await NotificationService.scheduleReminderNotification(newRem);
+  } catch (err) {
+    console.warn('Could not schedule local notification for reminder:', err?.message || err);
+  }
+
   return newRem;
 }

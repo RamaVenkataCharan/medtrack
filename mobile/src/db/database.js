@@ -96,6 +96,7 @@ const demoStore = {
  * Helper to check if current session is demo/test mode
  */
 async function isDemoSession() {
+  if (!Boolean(typeof __DEV__ !== 'undefined' && __DEV__)) return false;
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id && !session.user.is_demo) return false;
@@ -228,22 +229,8 @@ export async function searchCustomers(query = '') {
 
     return results.sort((a, b) => new Date(b.last_activity) - new Date(a.last_activity));
   } catch (err) {
-    if (await isDemoSession()) {
-      console.warn('searchCustomers demo notice:', err.message);
-      const active = demoStore.customers.filter((c) => !c.deleted_at);
-      return active.map((c) => ({
-        customer_id: c.customer_id,
-        phone_number: c.phone_number,
-        name: c.name,
-        village: c.village || '',
-        address: c.address || '',
-        created_at: c.created_at,
-        deleted_at: c.deleted_at,
-        total_due: calculateCustomerTotalDue(c.entries || []),
-        last_activity: c.created_at,
-      }));
-    }
-    throw err;
+    console.error('searchCustomers cloud error:', err.message);
+    throw new Error('Failed to search customers in cloud: ' + err.message);
   }
 }
 
@@ -287,7 +274,9 @@ export async function getCustomerById(customerId) {
         deleted_at,
         entries (
           entry_id,
-          due_amount
+          due_amount,
+          entry_date,
+          deleted_at
         )
       `)
       .eq('user_id', userId)
@@ -310,26 +299,11 @@ export async function getCustomerById(customerId) {
       created_at: data.created_at,
       deleted_at: data.deleted_at,
       total_due: totalDue,
-      total_entries: custEntries.length,
+      total_entries: custEntries.filter((e) => !e.deleted_at).length,
     };
   } catch (err) {
-    if (await isDemoSession()) {
-      const found = demoStore.customers.find((c) => c.customer_id === numericId);
-      if (!found) return null;
-      return {
-        customer_id: found.customer_id,
-        phone_number: found.phone_number,
-        name: found.name,
-        village: found.village || '',
-        address: found.address || '',
-        notes: found.notes || '',
-        created_at: found.created_at,
-        deleted_at: found.deleted_at,
-        total_due: calculateCustomerTotalDue(found.entries || []),
-        total_entries: (found.entries || []).length,
-      };
-    }
-    throw err;
+    console.error('getCustomerById cloud error:', err.message);
+    throw new Error('Failed to get customer: ' + err.message);
   }
 }
 
@@ -359,11 +333,8 @@ export async function getCustomerByPhone(phoneNumber) {
     if (error) throw error;
     return data || null;
   } catch (err) {
-    if (await isDemoSession()) {
-      const found = demoStore.customers.find((c) => c.phone_number === cleaned && !c.deleted_at);
-      return found || null;
-    }
-    throw err;
+    console.error('getCustomerByPhone cloud error:', err.message);
+    throw new Error('Failed to check customer by phone: ' + err.message);
   }
 }
 
@@ -411,31 +382,9 @@ export async function addCustomer({ name, phone_number, village, address, notes 
     if (error) throw error;
     return data.customer_id;
   } catch (err) {
-    if (await isDemoSession()) {
-      console.warn('addCustomer demo fallback notice:', err.message);
-      const newCust = {
-        customer_id: demoStore.nextCustomerId++,
-        phone_number: cleanedPhone,
-        name: (name || '').trim(),
-        village: (village || '').trim(),
-        address: (address || '').trim(),
-        notes: (notes || '').trim(),
-        created_at: now,
-        deleted_at: null,
-        entries: [],
-      };
-      demoStore.customers.unshift(newCust);
-      return newCust.customer_id;
-    }
     throw new Error('Failed to create customer: ' + (err.message || 'Database error'));
   }
 }
-
-// TODO: The recycle bin's soft-delete, restore, and permanent-delete logic currently
-// has no automated test coverage against Supabase (the legacy test_sqlite_recycle_bin.js
-// was removed as it tested deprecated local SQLite infrastructure). Implement automated
-// integration test coverage for Supabase softDeleteCustomer, restoreCustomer, and
-// permanentDeleteCustomer with Row Level Security.
 
 /**
  * ♻️ Soft-deletes a customer by updating deleted_at timestamp
@@ -463,11 +412,6 @@ export async function softDeleteCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    if (await isDemoSession()) {
-      const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-      if (cust) cust.deleted_at = now;
-      return true;
-    }
     throw new Error('Failed to move customer to Recycle Bin: ' + (err.message || 'Database error'));
   }
 }
@@ -498,11 +442,6 @@ export async function restoreCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    if (await isDemoSession()) {
-      const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-      if (cust) cust.deleted_at = null;
-      return true;
-    }
     throw new Error('Failed to restore customer: ' + (err.message || 'Database error'));
   }
 }
@@ -532,11 +471,6 @@ export async function permanentDeleteCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    if (await isDemoSession()) {
-      demoStore.customers = demoStore.customers.filter((c) => c.customer_id !== numericId);
-      demoStore.entries = demoStore.entries.filter((e) => e.customer_id !== numericId);
-      return true;
-    }
     throw new Error('Failed to permanently delete customer: ' + (err.message || 'Database error'));
   }
 }
@@ -729,28 +663,6 @@ export async function getCustomerLedger(customerId) {
       })),
     }));
   } catch (err) {
-    if (await isDemoSession()) {
-      const found = demoStore.entries.filter((e) => e.customer_id === numericId && !e.deleted_at);
-      return found.map((entry) => ({
-        entry_id: entry.entry_id,
-        customer_id: entry.customer_id,
-        entry_date: entry.entry_date,
-        total_amount: parseFloat(entry.total_amount) || 0,
-        amount_paid: parseFloat(entry.amount_paid) || 0,
-        due_amount: parseFloat(entry.due_amount) || 0,
-        notes: entry.notes || '',
-        medicines: (entry.medicines || []).map((m) => ({
-          id: m.id,
-          entry_id: entry.entry_id,
-          medicine_name: m.medicine_name,
-          price: parseFloat(m.price) || 0,
-          original_price: m.original_price != null ? parseFloat(m.original_price) : null,
-          discount_percent: parseFloat(m.discount_percent) || 0,
-          quantity: m.quantity != null ? parseInt(m.quantity, 10) : 1,
-          unit_price: m.unit_price != null ? parseFloat(m.unit_price) : parseFloat(m.price) || 0,
-        })),
-      }));
-    }
     console.error('getCustomerLedger cloud error:', err.message);
     throw new Error('Failed to retrieve ledger from cloud: ' + err.message);
   }
@@ -803,6 +715,46 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
 
   try {
     const userId = await getAuthUserId();
+
+    const validMeds = medicines
+      .filter((m) => (m.name || m.medicine_name || '').trim())
+      .map((m) => {
+        const name = (m.name || m.medicine_name).trim();
+        const medPrice = Math.max(0, parseFloat(m.price) || 0);
+        const origPrice = m.original_price != null ? Math.max(0, parseFloat(m.original_price)) : medPrice;
+        const discPct = m.discount_percent != null ? Math.max(0, parseFloat(m.discount_percent)) : 0;
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (medPrice / qty);
+
+        return {
+          medicine_name: name,
+          price: medPrice,
+          original_price: origPrice,
+          discount_percent: discPct,
+          quantity: qty,
+          unit_price: unitPrice,
+        };
+      });
+
+    // 1. Attempt atomic stored procedure (PostgreSQL single-transaction)
+    try {
+      const { data: rpcEntryId, error: rpcErr } = await supabase.rpc('create_purchase_atomic', {
+        p_customer_id: numericId,
+        p_total_amount: parsedTotal,
+        p_amount_paid: parsedPaid,
+        p_due_amount: dueAmount,
+        p_notes: (notes || '').trim() || '',
+        p_medicines: validMeds,
+      });
+
+      if (!rpcErr && rpcEntryId) {
+        return rpcEntryId;
+      }
+    } catch {
+      // Fall through to 2-phase compensating transaction if RPC not available
+    }
+
+    // 2. Client-side compensating transaction
     const { data: entryData, error: entryErr } = await supabase
       .from('entries')
       .insert({
@@ -821,30 +773,14 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
 
     const insertedEntryId = entryData.entry_id;
 
-    const validMeds = medicines
-      .filter((m) => (m.name || m.medicine_name || '').trim())
-      .map((m) => {
-        const name = (m.name || m.medicine_name).trim();
-        const medPrice = Math.max(0, parseFloat(m.price) || 0);
-        const origPrice = m.original_price != null ? Math.max(0, parseFloat(m.original_price)) : medPrice;
-        const discPct = m.discount_percent != null ? Math.max(0, parseFloat(m.discount_percent)) : 0;
-        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
-        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (medPrice / qty);
-
-        return {
-          user_id: userId,
-          entry_id: insertedEntryId,
-          medicine_name: name,
-          price: medPrice,
-          original_price: origPrice,
-          discount_percent: discPct,
-          quantity: qty,
-          unit_price: unitPrice,
-        };
-      });
-
     if (validMeds.length > 0) {
-      const { error: medErr } = await supabase.from('entry_medicines').insert(validMeds);
+      const medsWithKeys = validMeds.map((m) => ({
+        user_id: userId,
+        entry_id: insertedEntryId,
+        ...m,
+      }));
+
+      const { error: medErr } = await supabase.from('entry_medicines').insert(medsWithKeys);
       if (medErr) {
         console.error('Supabase addPurchaseEntry medicines error, rolling back entry:', medErr.message);
         // Atomic rollback: remove the orphaned entry so ledger and medicines never disagree
@@ -855,29 +791,6 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
 
     return insertedEntryId;
   } catch (err) {
-    if (await isDemoSession()) {
-      const newEntry = {
-        entry_id: demoStore.nextEntryId++,
-        customer_id: numericId,
-        entry_date: now,
-        total_amount: parsedTotal,
-        amount_paid: parsedPaid,
-        due_amount: dueAmount,
-        notes: (notes || '').trim(),
-        deleted_at: null,
-        medicines: medicines.map((m) => ({
-          id: demoStore.nextMedId++,
-          medicine_name: (m.name || m.medicine_name || '').trim(),
-          price: Math.max(0, parseFloat(m.price) || 0),
-          original_price: m.original_price != null ? parseFloat(m.original_price) : parseFloat(m.price) || 0,
-          discount_percent: parseFloat(m.discount_percent) || 0,
-          quantity: Math.max(1, parseInt(m.quantity, 10) || 1),
-          unit_price: m.unit_price != null ? parseFloat(m.unit_price) : (parseFloat(m.price) || 0),
-        })),
-      };
-      demoStore.entries.unshift(newEntry);
-      return newEntry.entry_id;
-    }
     console.error('addPurchaseEntry cloud error:', err.message);
     throw new Error('Failed to record purchase in cloud: ' + err.message);
   }
@@ -949,20 +862,6 @@ export async function addDuePayment({ customerId, amountPaid }) {
 
     return data.entry_id;
   } catch (err) {
-    if (await isDemoSession()) {
-      const newEntry = {
-        entry_id: demoStore.nextEntryId++,
-        customer_id: numericId,
-        entry_date: now,
-        total_amount: 0,
-        amount_paid: parsedPaid,
-        due_amount: dueAmount,
-        medicines: [],
-        deleted_at: null,
-      };
-      demoStore.entries.unshift(newEntry);
-      return newEntry.entry_id;
-    }
     console.error('addDuePayment cloud error:', err.message);
     throw new Error('Failed to record payment in cloud: ' + err.message);
   }
@@ -1074,13 +973,45 @@ export async function saveShopProfile(profile = {}) {
     if (error) throw error;
     return data;
   } catch (err) {
-    if (await isDemoSession()) {
-      demoStore.shopProfile = { ...demoStore.shopProfile, ...profile, updated_at: now };
-      return demoStore.shopProfile;
-    }
     console.error('saveShopProfile cloud error:', err.message);
     throw new Error('Failed to save shop profile to cloud: ' + err.message);
   }
+}
+
+/**
+ * Helper to fetch all rows across any table size using range-based pagination (bypasses Supabase 1,000 row limit)
+ */
+async function fetchAllRowsWithPagination(table, userId, orderColumn, pageSize = 1000) {
+  let allRows = [];
+  let from = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('user_id', userId)
+      .order(orderColumn, { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Failed to fetch ${table} (offset ${from}): ${error.message}`);
+    }
+
+    if (data && data.length > 0) {
+      allRows = allRows.concat(data);
+      if (data.length < pageSize) {
+        hasMore = false;
+      } else {
+        from += pageSize;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allRows;
 }
 
 /**
@@ -1108,41 +1039,20 @@ export async function exportAllData() {
   const userId = await getAuthUserId();
   const shopProfile = await getShopProfile();
 
-  // 1. Fetch all customers (including soft-deleted)
-  const { data: rawCustomers, error: custErr } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('user_id', userId)
-    .order('customer_id', { ascending: true });
+  // 1. Fetch all customers (with pagination)
+  const rawCustomers = await fetchAllRowsWithPagination('customers', userId, 'customer_id');
 
-  if (custErr) throw new Error('Export failed to read customers: ' + custErr.message);
+  // 2. Fetch all entries (with pagination)
+  const entries = await fetchAllRowsWithPagination('entries', userId, 'entry_id');
 
-  // 2. Fetch all entries
-  const { data: entries, error: entriesErr } = await supabase
-    .from('entries')
-    .select('*')
-    .eq('user_id', userId)
-    .order('entry_id', { ascending: true });
+  // 3. Fetch all medicines (with pagination)
+  const entryMedicines = await fetchAllRowsWithPagination('entry_medicines', userId, 'id');
 
-  if (entriesErr) throw new Error('Export failed to read entries: ' + entriesErr.message);
-
-  // 3. Fetch all medicines
-  const { data: entryMedicines, error: medsErr } = await supabase
-    .from('entry_medicines')
-    .select('*')
-    .eq('user_id', userId)
-    .order('id', { ascending: true });
-
-  if (medsErr) throw new Error('Export failed to read medicines: ' + medsErr.message);
-
-  // 4. Fetch all payments
-  const { data: payments, error: paymentsErr } = await supabase
-    .from('payments')
-    .select('*')
-    .eq('user_id', userId)
-    .order('payment_id', { ascending: true });
-
-  if (paymentsErr) {
+  // 4. Fetch all payments (with pagination)
+  let payments = [];
+  try {
+    payments = await fetchAllRowsWithPagination('payments', userId, 'payment_id');
+  } catch (paymentsErr) {
     console.warn('Export payments notice:', paymentsErr.message);
   }
 

@@ -174,9 +174,9 @@ export class AuthService {
         };
       }
 
-      // If test OTP was provided in development or for recognized demo phones
-      const isDevOrDemo = Boolean(typeof __DEV__ !== 'undefined' && __DEV__) || DEMO_PHONES.includes(cleanId);
-      if (isDevOrDemo && (VALID_TEST_OTPS.includes(cleanOtp) || DEMO_PHONES.includes(cleanId))) {
+      // If test OTP was provided in development
+      const isDev = Boolean(typeof __DEV__ !== 'undefined' && __DEV__);
+      if (isDev && (VALID_TEST_OTPS.includes(cleanOtp) || DEMO_PHONES.includes(cleanId))) {
         const testUser = {
           id: formatMockUUID(cleanId),
           phone: cleanId,
@@ -235,7 +235,8 @@ export class AuthService {
 
       console.log(`📧 Sending Email OTP to ${cleanEmail}...`);
 
-      if (cleanEmail.includes('demo') || cleanEmail.includes('test')) {
+      const isDev = Boolean(typeof __DEV__ !== 'undefined' && __DEV__);
+      if (isDev && (cleanEmail.includes('demo') || cleanEmail.includes('test'))) {
         console.log('🧪 Demo email detected. Use test OTP: 123456 or 000000');
         return {
           success: true,
@@ -328,8 +329,8 @@ export class AuthService {
         };
       }
 
-      const isDevOrDemo = Boolean(typeof __DEV__ !== 'undefined' && __DEV__) || cleanEmail.includes('demo') || cleanEmail.includes('test');
-      if (isDevOrDemo && (VALID_TEST_OTPS.includes(cleanOtp) || cleanEmail.includes('demo') || cleanEmail.includes('test'))) {
+      const isDev = Boolean(typeof __DEV__ !== 'undefined' && __DEV__);
+      if (isDev && (VALID_TEST_OTPS.includes(cleanOtp) || cleanEmail.includes('demo') || cleanEmail.includes('test'))) {
         const testUser = {
           id: cleanEmail === 'demo@medtrack.com' ? '00000000-0000-0000-0000-000000000001' : formatMockUUID(cleanEmail),
           email: cleanEmail,

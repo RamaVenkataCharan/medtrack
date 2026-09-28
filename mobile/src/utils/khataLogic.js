@@ -34,7 +34,8 @@ export function calculatePaymentDue(amountPaid) {
  * Calculates customer running balance across all ledger entries.
  */
 export function calculateCustomerTotalDue(entries = []) {
-  const sum = entries.reduce((acc, entry) => {
+  const sum = (entries || []).reduce((acc, entry) => {
+    if (entry.deleted_at) return acc;
     return acc + (parseFloat(entry.due_amount) || 0);
   }, 0);
   return parseFloat(sum.toFixed(2));

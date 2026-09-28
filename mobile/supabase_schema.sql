@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.entries (
   entry_date TIMESTAMPTZ DEFAULT NOW(),
   total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
-  due_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (due_amount >= 0),
+  due_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   notes TEXT DEFAULT '',
   deleted_at TIMESTAMPTZ DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -87,9 +87,9 @@ CREATE TABLE IF NOT EXISTS public.payments (
   payment_id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   customer_id BIGINT NOT NULL,
-  pay_date TIMESTAMPTZ DEFAULT NOW(),
+  payment_date TIMESTAMPTZ DEFAULT NOW(),
   amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (amount > 0),
-  note TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT fk_payments_customer FOREIGN KEY (user_id, customer_id)
     REFERENCES public.customers(user_id, customer_id) ON DELETE CASCADE
@@ -97,6 +97,68 @@ CREATE TABLE IF NOT EXISTS public.payments (
 
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_customer_id ON public.payments(customer_id);
+
+-- Atomic Purchase Transaction Function (ACID single-transaction purchase insertion)
+CREATE OR REPLACE FUNCTION public.create_purchase_atomic(
+  p_customer_id BIGINT,
+  p_total_amount NUMERIC,
+  p_amount_paid NUMERIC,
+  p_due_amount NUMERIC,
+  p_notes TEXT,
+  p_medicines JSONB
+) RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_user_id UUID := auth.uid();
+  v_entry_id BIGINT;
+  v_med JSONB;
+BEGIN
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required';
+  END IF;
+
+  IF p_total_amount < 0 OR p_amount_paid < 0 THEN
+    RAISE EXCEPTION 'Amounts must be non-negative';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.customers WHERE user_id = v_user_id AND customer_id = p_customer_id) THEN
+    RAISE EXCEPTION 'Customer does not belong to authenticated user';
+  END IF;
+
+  INSERT INTO public.entries (user_id, customer_id, entry_date, total_amount, amount_paid, due_amount, notes)
+  VALUES (v_user_id, p_customer_id, NOW(), p_total_amount, p_amount_paid, p_due_amount, p_notes)
+  RETURNING entry_id INTO v_entry_id;
+
+  IF p_medicines IS NOT NULL AND jsonb_array_length(p_medicines) > 0 THEN
+    FOR v_med IN SELECT * FROM jsonb_array_elements(p_medicines)
+    LOOP
+      INSERT INTO public.entry_medicines (
+        user_id,
+        entry_id,
+        medicine_name,
+        quantity,
+        unit_price,
+        price,
+        original_price,
+        discount_percent
+      ) VALUES (
+        v_user_id,
+        v_entry_id,
+        v_med->>'medicine_name',
+        COALESCE((v_med->>'quantity')::INTEGER, 1),
+        COALESCE((v_med->>'unit_price')::NUMERIC, 0),
+        COALESCE((v_med->>'price')::NUMERIC, 0),
+        (v_med->>'original_price')::NUMERIC,
+        COALESCE((v_med->>'discount_percent')::NUMERIC, 0)
+      );
+    END LOOP;
+  END IF;
+
+  RETURN v_entry_id;
+END;
+$$;
 
 -- Compatibility view for backend scripts referencing singular entry_medicine
 CREATE OR REPLACE VIEW public.entry_medicine AS
