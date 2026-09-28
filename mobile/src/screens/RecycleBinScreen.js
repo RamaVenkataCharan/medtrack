@@ -5,29 +5,57 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  StatusBar,
   ActivityIndicator,
   Alert,
+  Platform,
+  SafeAreaView,
+  Modal,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
-import { getDeletedCustomers, restoreCustomer, permanentDeleteCustomer } from '../db/database';
-import { formatLocalDateTime } from '../utils/dateUtils';
-import NetworkBanner from '../components/NetworkBanner';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, TOUCH_TARGETS } from '../constants/theme';
+import {
+  getDeletedCustomers,
+  restoreCustomer,
+  permanentDeleteCustomer,
+  getDeletedPurchases,
+  restorePurchase,
+  permanentDeletePurchase,
+} from '../db/database';
+import { formatDate } from '../utils/dateUtils';
+import Avatar from '../components/Avatar';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 export default function RecycleBinScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
+  const [activeTab, setActiveTab] = useState('customers'); // 'customers' | 'purchases'
   const [deletedCustomers, setDeletedCustomers] = useState([]);
+  const [deletedPurchases, setDeletedPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Restore Modal State (Screen 11)
+  const [restoreModalVisible, setRestoreModalVisible] = useState(false);
+  const [targetItem, setTargetItem] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+
+  // Restored Successfully State (Screen 12)
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [restoredCustomerData, setRestoredCustomerData] = useState(null);
+
+  // Permanent Delete Modal State
+  const [permDeleteModalVisible, setPermDeleteModalVisible] = useState(false);
+  const [deletingPermanent, setDeletingPermanent] = useState(false);
+
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const list = await getDeletedCustomers();
-      setDeletedCustomers(list || []);
+      const [custList, purList] = await Promise.all([
+        getDeletedCustomers().catch(() => []),
+        getDeletedPurchases().catch(() => []),
+      ]);
+      setDeletedCustomers(custList || []);
+      setDeletedPurchases(purList || []);
     } catch (err) {
-      console.error('Error loading deleted customers:', err);
+      console.warn('Error loading recycle bin:', err);
     } finally {
       setLoading(false);
     }
@@ -39,323 +67,638 @@ export default function RecycleBinScreen({ navigation }) {
     }, [loadData])
   );
 
-  const handleRestore = async (item) => {
+  const calculateDaysLeft = (deletedAt) => {
+    if (!deletedAt) return 30;
+    const deletedTime = new Date(deletedAt).getTime();
+    const elapsedDays = Math.floor((Date.now() - deletedTime) / (1000 * 60 * 60 * 24));
+    return Math.max(1, 30 - elapsedDays);
+  };
+
+  const handleOpenRestoreConfirm = (item) => {
+    setTargetItem(item);
+    setRestoreModalVisible(true);
+  };
+
+  const handleOpenPermDeleteConfirm = (item) => {
+    setTargetItem(item);
+    setPermDeleteModalVisible(true);
+  };
+
+  const executeRestore = async () => {
+    if (!targetItem) return;
+    setRestoring(true);
     try {
-      await restoreCustomer(item.customer_id);
-      Alert.alert('Customer Restored', `"${item.name}" has been restored to the active customer list.`);
+      if (activeTab === 'customers') {
+        await restoreCustomer(targetItem.customer_id);
+        setRestoredCustomerData(targetItem);
+        setRestoreModalVisible(false);
+        setSuccessModalVisible(true);
+      } else {
+        await restorePurchase(targetItem.entry_id);
+        setRestoreModalVisible(false);
+        if (Platform.OS === 'web') alert('Purchase record restored successfully.');
+        else Alert.alert('Restored', 'Purchase restored successfully.');
+      }
       await loadData();
     } catch (err) {
-      Alert.alert('Restore Failed', err.message || 'Could not restore customer.');
+      Alert.alert('Restore Failed', err.message || 'Could not restore record');
+    } finally {
+      setRestoring(false);
     }
   };
 
-  const handlePermanentDelete = (item) => {
-    Alert.alert(
-      'Delete Permanently?',
-      `Are you sure you want to permanently delete "${item.name}" and all their ${item.total_entries || 0} purchase history records?\n\n⚠️ This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Permanently',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await permanentDeleteCustomer(item.customer_id);
-              Alert.alert('Deleted', `"${item.name}" and all associated data have been permanently removed.`);
-              await loadData();
-            } catch (err) {
-              Alert.alert('Delete Failed', err.message || 'Could not permanently delete customer.');
-            }
-          },
-        },
-      ]
-    );
+  const executePermanentDelete = async () => {
+    if (!targetItem) return;
+    setDeletingPermanent(true);
+    try {
+      if (activeTab === 'customers') {
+        await permanentDeleteCustomer(targetItem.customer_id);
+      } else {
+        await permanentDeletePurchase(targetItem.entry_id);
+      }
+      setPermDeleteModalVisible(false);
+      await loadData();
+    } catch (err) {
+      Alert.alert('Delete Failed', err.message || 'Could not permanently delete record');
+    } finally {
+      setDeletingPermanent(false);
+    }
   };
 
-  const renderItem = ({ item }) => {
-    const totalDue = parseFloat(item.total_due || 0);
-    const hasDue = totalDue > 0;
+  const renderCustomerItem = ({ item }) => {
+    const daysLeft = calculateDaysLeft(item.deleted_at);
+    const deletedDateStr = item.deleted_at ? formatDate(item.deleted_at) : 'Recently';
 
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <View style={{ flex: 1, marginRight: SPACING.sm }}>
+          <Avatar name={item.name} size={46} />
+          <View style={styles.customerMeta}>
             <Text style={styles.customerName}>{item.name}</Text>
-            <Text style={styles.phoneText}>
-              <Ionicons name="call-outline" size={13} color={COLORS.textSecondary} /> {item.phone_number}
-              {item.village ? ` • ${item.village}` : ''}
-            </Text>
+            <Text style={styles.customerPhone}>{item.phone_number || 'No phone'}</Text>
+            <Text style={styles.deletedDate}>Deleted {deletedDateStr}</Text>
           </View>
-
-          <View style={[styles.dueBadge, hasDue ? styles.dueBadgeAlert : styles.dueBadgeClear]}>
-            <Text style={[styles.dueBadgeText, hasDue ? styles.dueBadgeTextAlert : styles.dueBadgeTextClear]}>
-              {hasDue ? `₹${totalDue.toFixed(0)} due` : 'All clear'}
-            </Text>
+          <View style={styles.daysBadge}>
+            <Text style={styles.daysText}>{daysLeft} days left</Text>
           </View>
         </View>
 
-        <View style={styles.deletedDateRow}>
-          <Ionicons name="time-outline" size={13} color={COLORS.textTertiary} />
-          <Text style={styles.deletedDateText}>
-            Deleted on: {formatLocalDateTime(item.deleted_at)}
-          </Text>
-          <Text style={styles.recordCountText}>
-            ({item.total_entries || 0} purchases)
-          </Text>
-        </View>
-
-        {/* Action Buttons */}
-        <View style={styles.actionsRow}>
+        <View style={styles.cardActions}>
           <TouchableOpacity
             style={styles.restoreBtn}
-            onPress={() => handleRestore(item)}
-            activeOpacity={0.7}
-            accessibilityLabel="Restore Customer"
+            onPress={() => handleOpenRestoreConfirm(item)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Restore ${item.name}`}
           >
-            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.paymentGreen} />
+            <Ionicons name="refresh" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
             <Text style={styles.restoreBtnText}>Restore</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.permanentDeleteBtn}
-            onPress={() => handlePermanentDelete(item)}
-            activeOpacity={0.7}
-            accessibilityLabel="Delete Permanently"
+            style={styles.permDeleteBtn}
+            onPress={() => handleOpenPermDeleteConfirm(item)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Permanently delete ${item.name}`}
           >
-            <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-            <Text style={styles.permanentDeleteBtnText}>Delete Permanently</Text>
+            <Ionicons name="trash-bin" size={16} color={COLORS.error} style={{ marginRight: 4 }} />
+            <Text style={styles.permDeleteBtnText}>Delete Permanently</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   };
 
-  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
+  const renderPurchaseItem = ({ item }) => {
+    const daysLeft = calculateDaysLeft(item.deleted_at);
+    const deletedDateStr = item.deleted_at ? formatDate(item.deleted_at) : 'Recently';
+    const amount = parseFloat(item.total_amount || 0);
+    const meds = item.medicines || [];
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.purchaseIconBox}>
+            <Ionicons name="receipt" size={22} color={COLORS.primary} />
+          </View>
+          <View style={styles.customerMeta}>
+            <Text style={styles.customerName}>{item.customer_name || 'Customer'}</Text>
+            <Text style={styles.customerPhone}>
+              {meds.length} medicines • ₹{amount.toFixed(0)}
+            </Text>
+            <Text style={styles.deletedDate}>Deleted {deletedDateStr}</Text>
+          </View>
+          <View style={styles.daysBadge}>
+            <Text style={styles.daysText}>{daysLeft} days left</Text>
+          </View>
+        </View>
+
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.restoreBtn}
+            onPress={() => handleOpenRestoreConfirm(item)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="refresh" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.restoreBtnText}>Restore</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.permDeleteBtn}
+            onPress={() => handleOpenPermDeleteConfirm(item)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="trash-bin" size={16} color={COLORS.error} style={{ marginRight: 4 }} />
+            <Text style={styles.permDeleteBtnText}>Delete Permanently</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-      <NetworkBanner />
-
-      {/* Navigation Header */}
-      <View style={styles.navBar}>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.header}>
         <TouchableOpacity
+          style={styles.backButton}
           onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
+          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.navTitle}>Recycle Bin</Text>
-          <Text style={styles.navSubtitle}>
-            {deletedCustomers.length} soft-deleted customer{deletedCustomers.length === 1 ? '' : 's'}
+        <Text style={styles.headerTitle}>Recycle Bin</Text>
+        <View style={{ width: 44 }} />
+      </View>
+
+      {/* 2-Tab Navigation: Customers (N) | Purchases (N) */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'customers' && styles.tabItemActive]}
+          onPress={() => setActiveTab('customers')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'customers' }}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === 'customers' && styles.tabTextActive,
+            ]}
+          >
+            Customers ({deletedCustomers.length})
           </Text>
-        </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'purchases' && styles.tabItemActive]}
+          onPress={() => setActiveTab('purchases')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'purchases' }}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === 'purchases' && styles.tabTextActive,
+            ]}
+          >
+            Purchases ({deletedPurchases.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Information Banner (Screen 10 in roadmap) */}
+      <View style={styles.noticeBanner}>
+        <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} style={{ marginRight: 8 }} />
+        <Text style={styles.noticeText}>
+          Deleted records are kept safely for 30 days. You can restore them anytime.
+        </Text>
       </View>
 
       {loading ? (
-        <View style={styles.centered}>
+        <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Checking recycle bin...</Text>
         </View>
-      ) : deletedCustomers.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <View style={styles.emptyIconWrap}>
-            <Ionicons name="trash-bin-outline" size={54} color={COLORS.borderStrong} />
+      ) : activeTab === 'customers' ? (
+        deletedCustomers.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="trash-bin-outline" size={48} color={COLORS.textMuted} />
+            <Text style={styles.emptyTitle}>Recycle Bin Empty</Text>
+            <Text style={styles.emptySubtitle}>No deleted customer records found.</Text>
           </View>
-          <Text style={styles.emptyTitle}>Recycle Bin is Empty</Text>
-          <Text style={styles.emptySubtitle}>
-            Customers you soft-delete will be stored here. You can restore them or permanently remove them anytime.
-          </Text>
+        ) : (
+          <FlatList
+            data={deletedCustomers}
+            keyExtractor={(item) => String(item.customer_id)}
+            renderItem={renderCustomerItem}
+            contentContainerStyle={styles.listContent}
+          />
+        )
+      ) : deletedPurchases.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="receipt-outline" size={48} color={COLORS.textMuted} />
+          <Text style={styles.emptyTitle}>No Deleted Purchases</Text>
+          <Text style={styles.emptySubtitle}>No deleted purchase records found.</Text>
         </View>
       ) : (
         <FlatList
-          data={deletedCustomers}
-          keyExtractor={(item) => String(item.customer_id)}
-          renderItem={renderItem}
+          data={deletedPurchases}
+          keyExtractor={(item) => String(item.entry_id)}
+          renderItem={renderPurchaseItem}
           contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
         />
       )}
-    </View>
+
+      {/* Screen 11: Restore Confirmation Modal */}
+      <ConfirmationModal
+        visible={restoreModalVisible}
+        onClose={() => setRestoreModalVisible(false)}
+        onConfirm={executeRestore}
+        title={
+          activeTab === 'customers'
+            ? `Restore ${targetItem?.name}?`
+            : `Restore Purchase for ${targetItem?.customer_name}?`
+        }
+        message="This record will be safely restored back to active customer records with zero data loss."
+        checklist={
+          activeTab === 'customers'
+            ? [
+                'Customer contact details & phone number',
+                `All past purchase history (${targetItem?.total_entries || 0} records)`,
+                'Recorded notes and dues',
+              ]
+            : ['Original purchase items and rates', 'Recorded total and payment status']
+        }
+        confirmText="Restore Record"
+        cancelText="Cancel"
+        isDestructive={false}
+        iconName="refresh"
+        confirmLoading={restoring}
+      />
+
+      {/* Screen 12: Restored Successfully Modal */}
+      <Modal
+        visible={successModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSuccessModalVisible(false)}
+      >
+        <View style={styles.successOverlay}>
+          <View style={styles.successCard}>
+            <View style={styles.successOuterGlow}>
+              <View style={styles.successIconCircle}>
+                <Ionicons name="checkmark" size={44} color="#FFFFFF" />
+              </View>
+            </View>
+
+            <Text style={styles.successTitle}>Customer Restored Successfully!</Text>
+            <Text style={styles.successSubtitle}>
+              <Text style={{ fontWeight: '700', color: COLORS.text }}>
+                {restoredCustomerData?.name}
+              </Text>{' '}
+              has been restored with all their information and purchase history.
+            </Text>
+
+            <View style={styles.successActions}>
+              <TouchableOpacity
+                style={styles.successPrimaryBtn}
+                onPress={() => {
+                  setSuccessModalVisible(false);
+                  navigation.navigate('CustomerProfile', {
+                    customerId: restoredCustomerData?.customer_id,
+                  });
+                }}
+              >
+                <Text style={styles.successPrimaryText}>View Customer</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.successSecondaryBtn}
+                onPress={() => {
+                  setSuccessModalVisible(false);
+                  navigation.navigate('AddPurchase', {
+                    customerId: restoredCustomerData?.customer_id,
+                    customer: restoredCustomerData,
+                  });
+                }}
+              >
+                <Text style={styles.successSecondaryText}>+ Add New Purchase</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Permanent Deletion Confirmation Modal */}
+      <ConfirmationModal
+        visible={permDeleteModalVisible}
+        onClose={() => setPermDeleteModalVisible(false)}
+        onConfirm={executePermanentDelete}
+        title="Delete Permanently?"
+        message="⚠️ This action CANNOT be undone. The record and its entire history will be permanently erased."
+        confirmText="Permanently Erase"
+        cancelText="Keep in Bin"
+        isDestructive={true}
+        iconName="trash"
+        confirmLoading={deletingPermanent}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navBar: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
+    paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.surface,
   },
-  backBtn: {
-    padding: SPACING.xs,
-    marginRight: SPACING.md,
+  backButton: {
+    width: TOUCH_TARGETS.minWidth,
+    height: TOUCH_TARGETS.minHeight,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
-  navTitle: {
-    ...FONTS.header,
+  headerTitle: {
+    ...TYPOGRAPHY.h2,
     fontSize: 20,
-    color: COLORS.textPrimary,
+    color: COLORS.text,
+    fontWeight: '700',
   },
-  navSubtitle: {
-    ...FONTS.subtext,
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: TOUCH_TARGETS.minHeight,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabItemActive: {
+    borderBottomColor: COLORS.primary,
+  },
+  tabText: {
+    ...TYPOGRAPHY.label,
+    fontSize: 15,
     color: COLORS.textSecondary,
-    marginTop: 1,
+    fontWeight: '500',
+  },
+  tabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  noticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#F8B4A2',
+  },
+  noticeText: {
+    flex: 1,
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.text,
+    lineHeight: 18,
   },
   listContent: {
-    paddingHorizontal: SPACING.xl,
-    paddingTop: SPACING.lg,
-    paddingBottom: 60,
+    padding: SPACING.md,
+    paddingBottom: SPACING.xxl,
   },
   card: {
     backgroundColor: COLORS.surface,
-    padding: SPACING.lg,
-    borderRadius: RADIUS.lg,
-    marginBottom: SPACING.md,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
     borderWidth: 1,
     borderColor: COLORS.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
   },
   cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.xs,
+    alignItems: 'center',
+  },
+  purchaseIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customerMeta: {
+    flex: 1,
+    marginLeft: SPACING.md,
   },
   customerName: {
-    ...FONTS.header,
-    fontSize: 17,
-    color: COLORS.textPrimary,
+    ...TYPOGRAPHY.label,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
   },
-  phoneText: {
-    ...FONTS.bodySecondary,
+  customerPhone: {
+    ...TYPOGRAPHY.caption,
     fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  deletedDate: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.textMuted,
     marginTop: 2,
   },
-  dueBadge: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 3,
-    borderRadius: RADIUS.pill,
+  daysBadge: {
+    backgroundColor: '#FDECE7',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
+    borderColor: '#F8B4A2',
   },
-  dueBadgeAlert: {
-    backgroundColor: COLORS.dueBadgeBg,
-    borderColor: COLORS.dueBadgeBorder,
-  },
-  dueBadgeClear: {
-    backgroundColor: COLORS.clearBadgeBg,
-    borderColor: COLORS.clearBadgeBorder,
-  },
-  dueBadgeText: {
+  daysText: {
+    ...TYPOGRAPHY.labelSmall,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: COLORS.error,
   },
-  dueBadgeTextAlert: {
-    color: COLORS.dueBadgeText,
-  },
-  dueBadgeTextClear: {
-    color: COLORS.clearBadgeText,
-  },
-  deletedDateRow: {
+  cardActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: SPACING.xs,
-    marginBottom: SPACING.md,
-    gap: 4,
-  },
-  deletedDateText: {
-    ...FONTS.subtext,
-    color: COLORS.textTertiary,
-    fontSize: 12,
-  },
-  recordCountText: {
-    ...FONTS.subtext,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: SPACING.md,
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
     paddingTop: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: COLORS.surfaceSubtle,
+    borderTopColor: COLORS.border,
   },
   restoreBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.paymentCardBg,
+    justifyContent: 'center',
+    backgroundColor: COLORS.primaryLight,
+    minHeight: 40,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: COLORS.paymentCardBorder,
-    paddingVertical: SPACING.xs + 3,
-    paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.md,
-    gap: 4,
+    borderColor: COLORS.primary,
   },
   restoreBtnText: {
-    ...FONTS.bodySecondary,
+    ...TYPOGRAPHY.labelSmall,
     fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.paymentGreen,
+    color: COLORS.primary,
+    fontWeight: '700',
   },
-  permanentDeleteBtn: {
+  permDeleteBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.dangerLight,
+    justifyContent: 'center',
+    backgroundColor: '#FFF5F5',
+    minHeight: 40,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: '#FCA5A5',
-    paddingVertical: SPACING.xs + 3,
-    paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.md,
-    gap: 4,
+    borderColor: '#FEB2B2',
   },
-  permanentDeleteBtnText: {
-    ...FONTS.bodySecondary,
+  permDeleteBtnText: {
+    ...TYPOGRAPHY.labelSmall,
     fontSize: 13,
+    color: COLORS.error,
     fontWeight: '600',
-    color: COLORS.danger,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  loadingText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xxxl,
-  },
-  emptyIconWrap: {
-    width: 90,
-    height: 90,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSubtle,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
+    padding: SPACING.xxl,
   },
   emptyTitle: {
-    ...FONTS.title,
-    fontSize: 20,
-    color: COLORS.textPrimary,
+    ...TYPOGRAPHY.h3,
+    fontSize: 18,
+    color: COLORS.text,
+    marginTop: SPACING.md,
     marginBottom: SPACING.xs,
   },
   emptySubtitle: {
-    ...FONTS.bodySecondary,
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    color: COLORS.textSecondary,
     textAlign: 'center',
-    lineHeight: 20,
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  successCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  successOuterGlow: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+    borderWidth: 4,
+    borderColor: '#F8B4A2',
+  },
+  successIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successTitle: {
+    ...TYPOGRAPHY.h2,
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: SPACING.xs,
+  },
+  successSubtitle: {
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: SPACING.xl,
+    lineHeight: 22,
+  },
+  successActions: {
+    width: '100%',
+    gap: SPACING.sm,
+  },
+  successPrimaryBtn: {
+    minHeight: TOUCH_TARGETS.minHeight,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successPrimaryText: {
+    ...TYPOGRAPHY.label,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  successSecondaryBtn: {
+    minHeight: TOUCH_TARGETS.minHeight,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successSecondaryText: {
+    ...TYPOGRAPHY.label,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
   },
 });

@@ -9,24 +9,23 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  StatusBar,
+  ActivityIndicator,
+  SafeAreaView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, TOUCH_TARGETS } from '../constants/theme';
 import { addCustomer, getCustomerByPhone } from '../db/database';
 import { cleanPhoneNumber } from '../utils/khataLogic';
 import NetworkBanner from '../components/NetworkBanner';
 
 export default function AddCustomerScreen({ navigation, route }) {
-  const insets = useSafeAreaInsets();
-  const initialValue = route.params?.initialPhoneOrName || '';
+  const initialValue = route.params?.initialName || route.params?.initialPhoneOrName || '';
   const isNumericInitial = /^\d+$/.test(initialValue);
 
   const [name, setName] = useState(!isNumericInitial ? initialValue : '');
   const [phone, setPhone] = useState(isNumericInitial ? initialValue : '');
-  const [village, setVillage] = useState('');
   const [address, setAddress] = useState('');
+  const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -34,18 +33,19 @@ export default function AddCustomerScreen({ navigation, route }) {
     const cleanPhone = cleanPhoneNumber(phone);
 
     if (!trimmedName) {
-      Alert.alert('Name Required', 'Please enter customer name.');
+      const msg = 'Please enter the customer name.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Name Required', msg);
       return;
     }
 
     if (cleanPhone.length < 10) {
-      Alert.alert('Invalid Phone Number', 'Please enter a valid 10-digit mobile number.');
+      const msg = 'Please enter a valid 10-digit mobile number.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Phone Number', msg);
       return;
     }
 
     setSaving(true);
     try {
-      // 1. Check for existing customer by phone number
       const existing = await getCustomerByPhone(cleanPhone);
       if (existing) {
         Alert.alert(
@@ -63,189 +63,238 @@ export default function AddCustomerScreen({ navigation, route }) {
         return;
       }
 
-      // 2. Add new customer
       const newId = await addCustomer({
         name: trimmedName,
         phone_number: cleanPhone,
-        village: village.trim(),
         address: address.trim(),
+        notes: notes.trim(),
       });
 
-      // 3. Immediately open newly created profile
       navigation.replace('CustomerProfile', { customerId: newId });
     } catch (err) {
-      console.error('Error adding customer:', err);
-      Alert.alert('Error', 'Failed to save customer: ' + (err.message || 'Please check your connection'));
+      console.warn('Error adding customer:', err);
+      Alert.alert('Error', err.message || 'Could not save customer');
     } finally {
       setSaving(false);
     }
   };
 
-  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.xs;
-
   return (
-    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+    <SafeAreaView style={styles.safeArea}>
       <NetworkBanner />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
+        {/* Top Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Add Customer</Text>
+          <View style={{ width: 44 }} />
+        </View>
+
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.title}>New Customer</Text>
+          {/* Avatar Icon Placeholder */}
+          <View style={styles.avatarSection}>
+            <View style={styles.avatarCircle}>
+              <Ionicons name="person" size={40} color={COLORS.primary} />
+            </View>
+            <Text style={styles.avatarHint}>New Customer Record</Text>
           </View>
 
           {/* Form Card */}
           <View style={styles.formCard}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Customer Name *</Text>
+              <Text style={styles.label}>
+                Full Name <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Ramesh Kumar"
-                placeholderTextColor={COLORS.textTertiary}
                 value={name}
                 onChangeText={setName}
-                autoFocus={!isNumericInitial}
-                autoCapitalize="words"
+                placeholder="Enter customer name"
+                placeholderTextColor={COLORS.textMuted}
+                autoFocus={!name}
+                accessibilityLabel="Full Name"
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Phone Number (10 digits) *</Text>
+              <Text style={styles.label}>
+                Phone Number <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. 9876543210"
-                placeholderTextColor={COLORS.textTertiary}
                 value={phone}
                 onChangeText={setPhone}
+                placeholder="Enter 10-digit phone number"
+                placeholderTextColor={COLORS.textMuted}
                 keyboardType="phone-pad"
-                maxLength={10}
-                autoFocus={isNumericInitial}
+                accessibilityLabel="Phone Number"
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Village / Locality (Optional)</Text>
+              <Text style={styles.label}>Address (Optional)</Text>
               <TextInput
-                style={styles.input}
-                placeholder="e.g. Nizampet"
-                placeholderTextColor={COLORS.textTertiary}
-                value={village}
-                onChangeText={setVillage}
-                autoCapitalize="words"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Address / Landmark (Optional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="e.g. Near Ramalayam Temple"
-                placeholderTextColor={COLORS.textTertiary}
+                style={[styles.input, styles.multilineInput]}
                 value={address}
                 onChangeText={setAddress}
-                multiline={true}
+                placeholder="Enter street, village or city"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
                 numberOfLines={2}
+                accessibilityLabel="Address"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Notes (Optional)</Text>
+              <TextInput
+                style={[styles.input, styles.multilineInput]}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="e.g. Regular BP patient, needs reminder"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+                numberOfLines={2}
+                accessibilityLabel="Notes"
               />
             </View>
           </View>
 
-          {/* Save Button */}
+          {/* Save Customer Primary CTA */}
           <TouchableOpacity
-            style={[styles.saveBtn, saving && styles.btnDisabled]}
-            activeOpacity={0.85}
+            style={styles.saveBtn}
             onPress={handleSave}
             disabled={saving}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Save Customer"
           >
-            <Ionicons name="checkmark-circle-outline" size={22} color={COLORS.textInverted} />
-            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save & Open Profile'}</Text>
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.saveBtnText}>Save Customer</Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  scrollContent: {
-    padding: SPACING.xl,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.xl,
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
+    paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  backBtn: {
-    marginRight: SPACING.md,
-    padding: SPACING.xs,
+  backButton: {
+    width: TOUCH_TARGETS.minWidth,
+    height: TOUCH_TARGETS.minHeight,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
-  title: {
-    ...FONTS.title,
+  headerTitle: {
+    ...TYPOGRAPHY.h2,
+    fontSize: 20,
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  scrollContent: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.xxl,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginVertical: SPACING.md,
+  },
+  avatarCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#E8C5B5',
+  },
+  avatarHint: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
   },
   formCard: {
     backgroundColor: COLORS.surface,
-    padding: SPACING.xl,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.md,
+    padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
-    marginBottom: SPACING.xl,
-  },
-  inputGroup: {
     marginBottom: SPACING.lg,
   },
+  inputGroup: {
+    marginBottom: SPACING.md,
+  },
   label: {
-    ...FONTS.bodySecondary,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.xs + 2,
+    ...TYPOGRAPHY.label,
+    fontSize: 14,
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  requiredStar: {
+    color: COLORS.error,
   },
   input: {
-    backgroundColor: COLORS.surfaceSubtle,
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
     paddingHorizontal: SPACING.md,
-    height: 52,
-    ...FONTS.body,
+    minHeight: TOUCH_TARGETS.minHeight,
+    ...TYPOGRAPHY.body,
+    fontSize: 16,
+    color: COLORS.text,
   },
-  textArea: {
-    height: 70,
-    paddingTop: SPACING.md,
+  multilineInput: {
+    minHeight: 64,
+    paddingTop: SPACING.sm,
     textAlignVertical: 'top',
   },
   saveBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    minHeight: TOUCH_TARGETS.minHeight,
     backgroundColor: COLORS.primary,
-    height: 54,
-    borderRadius: RADIUS.pill,
-    gap: SPACING.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 5,
+    borderRadius: RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
     elevation: 3,
   },
-  btnDisabled: {
-    opacity: 0.6,
-  },
   saveBtnText: {
-    ...FONTS.body,
+    ...TYPOGRAPHY.label,
+    fontSize: 17,
     fontWeight: '700',
-    color: COLORS.textInverted,
-    fontSize: 16,
+    color: '#FFFFFF',
   },
 });

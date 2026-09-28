@@ -3,131 +3,78 @@ import {
   View,
   Text,
   TextInput,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   TouchableWithoutFeedback,
   StyleSheet,
-  StatusBar,
   ActivityIndicator,
   Alert,
   Platform,
+  SafeAreaView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
-import { searchCustomers, getActiveDriverName, getDeletedCustomerCount, softDeleteCustomer } from '../db/database';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, TOUCH_TARGETS } from '../constants/theme';
+import {
+  getDashboardSummary,
+  getShopProfile,
+  getDeletedCustomerCount,
+} from '../db/database';
 import { exportKhataBackup } from '../services/exportService';
 import { AuthService } from '../services/authService';
-import { LocalMigrationService } from '../services/localMigrationService';
+import Avatar from '../components/Avatar';
+import StatCard from '../components/StatCard';
+import BottomNavBar from '../components/BottomNavBar';
 import NetworkBanner from '../components/NetworkBanner';
-import CustomerCard from '../components/CustomerCard';
+import { formatDate } from '../utils/dateUtils';
 
 export default function HomeScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
-  const [query, setQuery] = useState('');
-  const [customers, setCustomers] = useState([]);
+  const [shopName, setShopName] = useState('Sri Sai Medicals');
+  const [summary, setSummary] = useState({
+    todayPurchases: 0,
+    todayCustomers: 0,
+    todaySales: 0,
+    todayDues: 0,
+    recentCustomers: [],
+  });
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [userPhone, setUserPhone] = useState('');
-  const [deletedCount, setDeletedCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [deletedCount, setDeletedCount] = useState(0);
+  const [userEmail, setUserEmail] = useState('');
 
-  useEffect(() => {
-    AuthService.getCurrentUser().then((user) => {
-      if (user?.phone) {
-        setUserPhone(user.phone);
-      }
-    });
-  }, []);
-
-  const handleLogout = () => {
-    const doLogout = async () => {
-      await AuthService.logout();
-    };
-
-    if (Platform.OS === 'web') {
-      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to log out?') : true;
-      if (confirmed) {
-        doLogout();
-      }
-      return;
-    }
-
-    Alert.alert(
-      'Logout',
-      userPhone ? `Logged in as ${userPhone}.\nAre you sure you want to log out?` : 'Are you sure you want to log out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: doLogout,
-        },
-      ]
-    );
-  };
-
-  // Check for pre-existing local SQLite data to upload
-  useEffect(() => {
-    LocalMigrationService.checkPendingLocalData().then(({ hasData, count }) => {
-      if (hasData && count > 0) {
-        Alert.alert(
-          '📦 Local Khata Data Detected',
-          `Found ${count} customer record(s) stored on this device from before the cloud migration. Would you like to upload them to your MedTrack Cloud account now?`,
-          [
-            { text: 'Later', style: 'cancel' },
-            {
-              text: 'Upload to Cloud',
-              onPress: async () => {
-                try {
-                  setLoading(true);
-                  const res = await LocalMigrationService.migrateToCloud();
-                  Alert.alert(
-                    '✅ Upload Complete',
-                    `Successfully migrated ${res.customersMigrated} customers and ${res.entriesMigrated} entries to MedTrack Cloud.`
-                  );
-                  loadData();
-                } catch (migErr) {
-                  Alert.alert('Upload Failed', migErr.message || 'Could not upload local data');
-                } finally {
-                  setLoading(false);
-                }
-              },
-            },
-          ]
-        );
-      }
-    });
-  }, []);
+  const todayStr = (() => {
+    const now = new Date();
+    const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
+    return now.toLocaleDateString('en-IN', options);
+  })();
 
   const loadData = useCallback(async () => {
-    setLoading(true);
     try {
-      const results = await searchCustomers(query);
-      setCustomers(results || []);
-      const count = await getDeletedCustomerCount();
-      setDeletedCount(count || 0);
+      const [sumData, profileData, delCount, user] = await Promise.all([
+        getDashboardSummary().catch(() => null),
+        getShopProfile().catch(() => null),
+        getDeletedCustomerCount().catch(() => 0),
+        AuthService.getCurrentUser().catch(() => null),
+      ]);
+
+      if (sumData) {
+        setSummary(sumData);
+      }
+      if (profileData?.shop_name || profileData?.name) {
+        setShopName(profileData.shop_name || profileData.name);
+      }
+      setDeletedCount(delCount || 0);
+      if (user) {
+        setUserEmail(user.email || user.phone || '');
+      }
     } catch (e) {
-      console.error('Error loading customers:', e);
+      console.warn('Dashboard load error:', e);
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, []);
 
-  // Dismiss profile dropdown on Web Escape key press
-  useEffect(() => {
-    if (!isProfileMenuOpen || Platform.OS !== 'web') return;
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setIsProfileMenuOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isProfileMenuOpen]);
-
-  // Reload when screen regains focus or query changes
   useFocusEffect(
     useCallback(() => {
       setIsProfileMenuOpen(false);
@@ -135,140 +82,77 @@ export default function HomeScreen({ navigation }) {
     }, [loadData])
   );
 
-  useEffect(() => {
-    loadData();
-  }, [query, loadData]);
+  const handleLogout = () => {
+    setIsProfileMenuOpen(false);
+    const doLogout = async () => {
+      await AuthService.logout();
+    };
 
-  const handleExport = async () => {
-    setExporting(true);
-    await exportKhataBackup();
-    setExporting(false);
-  };
-
-  const handleDeleteCustomer = (customer) => {
-    const currentDue = parseFloat(customer.total_due || 0);
-    const dueWarning = currentDue > 0
-      ? `\n\n⚠️ Warning: ${customer.name} currently has an unpaid balance of ₹${currentDue.toFixed(2)}.`
-      : '';
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to log out of MedTrack?') : true;
+      if (confirmed) {
+        doLogout();
+      }
+      return;
+    }
 
     Alert.alert(
-      '🗑️ Delete Customer',
-      `Are you sure you want to delete ${customer.name}? This can be restored from recycle bin.${dueWarning}`,
+      'Log Out',
+      'Are you sure you want to log out of your MedTrack account?',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await softDeleteCustomer(customer.customer_id);
-              Alert.alert('✅ Deleted', `"${customer.name}" moved to recycle bin`);
-              loadData();
-              const count = await getDeletedCustomerCount();
-              setDeletedCount(count);
-            } catch (err) {
-              Alert.alert('❌ Error', err.message || 'Failed to delete customer');
-            }
-          },
-        },
+        { text: 'Log Out', style: 'destructive', onPress: doLogout },
       ]
     );
   };
 
-  const renderCustomerItem = ({ item }) => {
-    return (
-      <CustomerCard
-        customer={item}
-        onPress={() => navigation.navigate('CustomerProfile', { customerId: item.customer_id })}
-        onDelete={() => handleDeleteCustomer(item)}
-      />
-    );
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim().length > 0) {
+      navigation.navigate('CustomerSearch', { initialQuery: searchQuery.trim() });
+    } else {
+      navigation.navigate('CustomerSearch');
+    }
   };
 
-  const topPadding = Math.max(insets.top, (StatusBar.currentHeight || 0)) + SPACING.sm;
-  // Dynamic bottom clearance for 3-button nav and gesture bars:
-  // Android 3-button nav bar is ~48px; guarantee at least 48px base inset + 24px extra breathing room
-  const baseBottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 48 : 0);
-  const bottomFabPadding = Math.max(baseBottomInset, Platform.OS === 'android' ? 48 : 0) + 24;
-
   return (
-    <View style={[styles.container, { paddingTop: topPadding, paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 24 : SPACING.md) }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+    <SafeAreaView style={styles.safeArea}>
       <NetworkBanner />
 
-      {/* Notebook Header */}
+      {/* Top Header */}
       <View style={styles.header}>
-        <View style={{ flex: 1, marginRight: SPACING.xs }}>
-          <Text style={styles.appTitle}>MedTrack</Text>
-          <Text style={styles.appSubtitle} numberOfLines={1}>
-            Medical Khata Book
+        <View style={styles.headerLeft}>
+          <Text style={styles.greetingText}>Good Morning,</Text>
+          <Text style={styles.shopNameText} numberOfLines={1}>
+            {shopName}
           </Text>
+          <Text style={styles.dateText}>{todayStr}</Text>
         </View>
 
-        <View style={styles.headerActions}>
-          {/* Action 1: Backup (Unchanged) */}
-          <TouchableOpacity
-            style={styles.headerBackupBtn}
-            onPress={handleExport}
-            disabled={exporting}
-            accessibilityLabel="Export Backup"
-            activeOpacity={0.8}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={COLORS.primary} />
-            ) : (
-              <>
-                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} style={{ marginRight: 4 }} />
-                <Text style={styles.headerBackupText}>Backup</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Action 2: Recycle Bin */}
-          <TouchableOpacity
-            style={styles.headerIconBtn}
-            onPress={() => {
-              setIsProfileMenuOpen(false);
-              navigation.navigate('RecycleBin');
-            }}
-            accessibilityLabel="Recycle Bin"
-            activeOpacity={0.7}
-          >
-            <Ionicons name="trash-bin-outline" size={17} color={COLORS.textSecondary} />
-            {deletedCount > 0 && (
-              <View style={styles.actionBadgeDot} />
-            )}
-          </TouchableOpacity>
-
-          {/* Action 3: User Profile Avatar Control */}
+        <View style={styles.headerRight}>
+          {/* Avatar button opening minimal dropdown */}
           <TouchableOpacity
             style={[
-              styles.headerAvatarBtn,
-              isProfileMenuOpen && styles.headerAvatarBtnActive,
+              styles.avatarBtn,
+              isProfileMenuOpen && styles.avatarBtnActive,
             ]}
             onPress={() => setIsProfileMenuOpen((prev) => !prev)}
-            accessibilityLabel="User Profile Menu"
             accessibilityRole="button"
+            accessibilityLabel="User profile menu"
             accessibilityExpanded={isProfileMenuOpen}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name="person-outline"
-              size={18}
-              color={isProfileMenuOpen ? COLORS.primary : COLORS.textPrimary}
-            />
+            <Avatar name={shopName} size={42} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Floating User Profile Dropdown Menu */}
+      {/* Floating Profile Dropdown Menu */}
       {isProfileMenuOpen && (
         <>
           <TouchableWithoutFeedback onPress={() => setIsProfileMenuOpen(false)}>
             <View style={styles.menuBackdrop} />
           </TouchableWithoutFeedback>
-          <View style={[styles.profileDropdown, { top: topPadding + 44 }]} accessibilityRole="menu">
-            {/* 1. My Profile */}
+          <View style={styles.dropdownMenu}>
             <TouchableOpacity
               style={styles.dropdownItem}
               onPress={() => {
@@ -277,15 +161,11 @@ export default function HomeScreen({ navigation }) {
               }}
               accessibilityRole="menuitem"
               accessibilityLabel="My Profile"
-              activeOpacity={0.7}
             >
-              <View style={styles.dropdownItemIconWrap}>
-                <Ionicons name="person-outline" size={17} color={COLORS.textPrimary} />
-              </View>
+              <Ionicons name="person-outline" size={18} color={COLORS.text} style={styles.dropdownIcon} />
               <Text style={styles.dropdownItemText}>My Profile</Text>
             </TouchableOpacity>
 
-            {/* 2. Account Settings */}
             <TouchableOpacity
               style={styles.dropdownItem}
               onPress={() => {
@@ -294,260 +174,312 @@ export default function HomeScreen({ navigation }) {
               }}
               accessibilityRole="menuitem"
               accessibilityLabel="Account Settings"
-              activeOpacity={0.7}
             >
-              <View style={styles.dropdownItemIconWrap}>
-                <Ionicons name="settings-outline" size={17} color={COLORS.textPrimary} />
-              </View>
+              <Ionicons name="settings-outline" size={18} color={COLORS.text} style={styles.dropdownIcon} />
               <Text style={styles.dropdownItemText}>Account Settings</Text>
             </TouchableOpacity>
 
             <View style={styles.dropdownDivider} />
 
-            {/* 3. Logout */}
             <TouchableOpacity
               style={styles.dropdownItem}
-              onPress={() => {
-                setIsProfileMenuOpen(false);
-                handleLogout();
-              }}
+              onPress={handleLogout}
               accessibilityRole="menuitem"
-              accessibilityLabel="Logout"
-              activeOpacity={0.7}
+              accessibilityLabel="Log Out"
             >
-              <View style={styles.dropdownItemIconWrap}>
-                <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
-              </View>
-              <Text style={[styles.dropdownItemText, styles.dropdownLogoutText]}>Logout</Text>
+              <Ionicons name="log-out-outline" size={18} color={COLORS.error} style={styles.dropdownIcon} />
+              <Text style={[styles.dropdownItemText, { color: COLORS.error }]}>Log Out</Text>
             </TouchableOpacity>
           </View>
         </>
       )}
 
-      {/* Auto-focused Large Search Box */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={COLORS.textTertiary} style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by phone or name..."
-          placeholderTextColor={COLORS.textTertiary}
-          value={query}
-          onChangeText={setQuery}
-          autoFocus={true}
-          keyboardType="default"
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-        {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery('')} style={styles.clearSearchBtn}>
-            <Ionicons name="close-circle" size={18} color={COLORS.textTertiary} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Customer List or Empty Match */}
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      ) : customers.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="book-outline" size={48} color={COLORS.borderStrong} />
-          <Text style={styles.emptyTitle}>
-            {query.trim() ? `No customer matching "${query}"` : 'No customers yet'}
-          </Text>
-          <Text style={styles.emptySubtitle}>
-            Add this customer to start tracking medicines and purchases.
-          </Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Large Customer Search Bar */}
+        <View style={styles.searchSection}>
           <TouchableOpacity
-            style={styles.addCustomerEmptyBtn}
-            onPress={() => navigation.navigate('AddCustomer', { initialPhoneOrName: query.trim() })}
+            style={styles.searchBar}
+            onPress={() => navigation.navigate('CustomerSearch')}
+            activeOpacity={0.8}
+            accessibilityRole="search"
+            accessibilityLabel="Search customer by name or phone"
           >
-            <Ionicons name="person-add-outline" size={20} color={COLORS.textInverted} />
-            <Text style={styles.addCustomerEmptyBtnText}>+ Add Customer</Text>
+            <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search customer by name or phone..."
+              placeholderTextColor={COLORS.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearchSubmit}
+              returnKeyType="search"
+            />
+            <TouchableOpacity
+              onPress={handleSearchSubmit}
+              style={styles.searchSubmitBtn}
+              accessibilityLabel="Execute search"
+            >
+              <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
+            </TouchableOpacity>
           </TouchableOpacity>
         </View>
-      ) : (
-        <FlatList
-          data={customers}
-          keyExtractor={(item) => String(item.customer_id)}
-          renderItem={renderCustomerItem}
-          contentContainerStyle={[styles.listContent, { paddingBottom: bottomFabPadding + 64 }]}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
 
-      {/* Floating Add Customer Button */}
-      {customers.length > 0 && (
-        <TouchableOpacity
-          style={[styles.fab, { bottom: bottomFabPadding }]}
-          activeOpacity={0.85}
-          onPress={() => navigation.navigate('AddCustomer', { initialPhoneOrName: query.trim() })}
-        >
-          <Ionicons name="person-add" size={18} color={COLORS.textInverted} />
-          <Text style={styles.fabText}>+ Add Customer</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+        {/* Two Hero Action Cards */}
+        <View style={styles.heroRow}>
+          {/* Card 1: Find Customer */}
+          <TouchableOpacity
+            style={[styles.heroCard, styles.heroCardDark]}
+            onPress={() => navigation.navigate('CustomerSearch')}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Find Customer. Search & view history."
+          >
+            <View style={styles.heroIconBoxDark}>
+              <Ionicons name="search" size={24} color="#FFFFFF" />
+            </View>
+            <Text style={styles.heroTitleLight}>Find Customer</Text>
+            <Text style={styles.heroSubtitleLight}>Search & view history</Text>
+          </TouchableOpacity>
+
+          {/* Card 2: Record Purchase */}
+          <TouchableOpacity
+            style={[styles.heroCard, styles.heroCardPrimary]}
+            onPress={() => navigation.navigate('AddPurchase')}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Record Purchase. Add customer or medicines."
+          >
+            <View style={styles.heroIconBoxPrimary}>
+              <Ionicons name="add" size={26} color={COLORS.primary} />
+            </View>
+            <Text style={styles.heroTitleLight}>Record Purchase</Text>
+            <Text style={styles.heroSubtitleLight}>Add customer or medicines</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Today's Summary */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Today's Summary</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('CustomerSearch', { initialFilter: 'recent' })}
+            accessibilityRole="button"
+            accessibilityLabel="See all summary"
+          >
+            <Text style={styles.seeAllText}>See All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.statsRow}>
+          <StatCard
+            label="Purchases"
+            value={summary.todayPurchases}
+            style={styles.statCardItem}
+          />
+          <StatCard
+            label="Customers"
+            value={summary.todayCustomers}
+            style={styles.statCardItem}
+          />
+          <StatCard
+            label="Sales"
+            value={`₹${summary.todaySales}`}
+            highlightColor={COLORS.primary}
+            style={styles.statCardItem}
+          />
+          <StatCard
+            label="Due"
+            value={`₹${summary.todayDues}`}
+            highlightColor={summary.todayDues > 0 ? COLORS.error : COLORS.text}
+            style={styles.statCardItem}
+          />
+        </View>
+
+        {/* Recent Customers */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Recent Customers</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('CustomerSearch')}
+            accessibilityRole="button"
+            accessibilityLabel="See all customers"
+          >
+            <Text style={styles.seeAllText}>See All</Text>
+          </TouchableOpacity>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          </View>
+        ) : summary.recentCustomers.length === 0 ? (
+          <View style={styles.emptyRecentCard}>
+            <Ionicons name="people-outline" size={36} color={COLORS.textMuted} />
+            <Text style={styles.emptyRecentText}>No recent customers yet.</Text>
+            <TouchableOpacity
+              style={styles.emptyAddCustBtn}
+              onPress={() => navigation.navigate('AddCustomer')}
+            >
+              <Text style={styles.emptyAddCustBtnText}>+ Add First Customer</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.recentList}>
+            {summary.recentCustomers.map((cust) => {
+              const formattedDate = cust.last_purchase_date
+                ? formatDate(cust.last_purchase_date)
+                : 'Recent';
+
+              return (
+                <TouchableOpacity
+                  key={cust.customer_id}
+                  style={styles.recentCustomerItem}
+                  onPress={() =>
+                    navigation.navigate('CustomerProfile', {
+                      customerId: cust.customer_id,
+                      customer: cust,
+                    })
+                  }
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${cust.name}, last purchase ${formattedDate}`}
+                >
+                  <Avatar name={cust.name} size={44} />
+                  <View style={styles.recentMeta}>
+                    <Text style={styles.recentName}>{cust.name}</Text>
+                    <Text style={styles.recentDate}>Last purchase: {formattedDate}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* 5-Tab Navigation Bar */}
+      <BottomNavBar currentRoute="Home" navigation={navigation} />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
-    paddingTop: SPACING.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
     paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  appTitle: {
-    ...FONTS.title,
+  headerLeft: {
+    flex: 1,
+  },
+  greetingText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  shopNameText: {
+    ...TYPOGRAPHY.h2,
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginTop: 1,
+  },
+  dateText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
     color: COLORS.primary,
-  },
-  appSubtitle: {
-    ...FONTS.subtext,
-    color: COLORS.textSecondary,
+    fontWeight: '600',
     marginTop: 2,
   },
-  headerActions: {
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
-  headerBackupBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: RADIUS.pill,
-    borderWidth: 1,
-    borderColor: COLORS.primaryBorder,
+  avatarBtn: {
+    padding: 2,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  headerBackupText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  headerIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  headerAvatarBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  headerAvatarBtnActive: {
+  avatarBtnActive: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primaryLight,
   },
   menuBackdrop: {
     position: 'absolute',
     top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
     zIndex: 998,
   },
-  profileDropdown: {
+  dropdownMenu: {
     position: 'absolute',
-    right: SPACING.xl,
-    width: 195,
+    top: 75,
+    right: SPACING.lg,
+    width: 200,
     backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingVertical: SPACING.xs,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
     zIndex: 999,
+    paddingVertical: SPACING.xs,
   },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: SPACING.sm,
     paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.sm,
-    marginHorizontal: 4,
+    minHeight: 44,
   },
-  dropdownItemIconWrap: {
-    width: 22,
+  dropdownIcon: {
     marginRight: SPACING.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   dropdownItemText: {
-    ...FONTS.body,
+    ...TYPOGRAPHY.label,
     fontSize: 14,
-    fontWeight: '500',
-    color: COLORS.textPrimary,
-  },
-  dropdownLogoutText: {
-    color: COLORS.danger,
-    fontWeight: '600',
+    color: COLORS.text,
   },
   dropdownDivider: {
     height: 1,
     backgroundColor: COLORS.border,
     marginVertical: 4,
-    marginHorizontal: SPACING.xs,
   },
-  actionBadgeDot: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: COLORS.primary,
-    borderWidth: 1.5,
-    borderColor: COLORS.surface,
+  scrollContent: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.xxl,
   },
-  searchContainer: {
+  searchSection: {
+    marginBottom: SPACING.md,
+  },
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    marginHorizontal: SPACING.xl,
-    marginVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    height: 52,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md,
+    minHeight: TOUCH_TARGETS.minHeight,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
     elevation: 1,
   },
   searchIcon: {
@@ -555,129 +487,160 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    ...FONTS.body,
-    height: '100%',
+    ...TYPOGRAPHY.body,
+    fontSize: 16,
+    color: COLORS.text,
+    paddingVertical: 10,
   },
-  clearSearchBtn: {
+  searchSubmitBtn: {
     padding: SPACING.xs,
   },
-  listContent: {
-    paddingHorizontal: SPACING.xl,
-    paddingBottom: 85,
-    paddingTop: SPACING.xs,
+  heroRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
   },
-  customerCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.lg,
-    borderRadius: RADIUS.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  heroCard: {
+    flex: 1,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    justifyContent: 'space-between',
+    minHeight: 120,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  cardHeader: {
+  heroCardDark: {
+    backgroundColor: '#352520',
+  },
+  heroCardPrimary: {
+    backgroundColor: COLORS.primary,
+  },
+  heroIconBoxDark: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  heroIconBoxPrimary: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  heroTitleLight: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  heroSubtitleLight: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 2,
+  },
+  sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: SPACING.sm,
+    paddingHorizontal: 2,
   },
-  customerName: {
-    ...FONTS.header,
-    flex: 1,
-    marginRight: SPACING.sm,
+  sectionTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.text,
   },
-  dueBadge: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 3,
-    borderRadius: RADIUS.pill,
-    borderWidth: 1,
-  },
-  dueBadgeAlert: {
-    backgroundColor: COLORS.dueBadgeBg,
-    borderColor: COLORS.dueBadgeBorder,
-  },
-  dueBadgeClear: {
-    backgroundColor: COLORS.clearBadgeBg,
-    borderColor: COLORS.clearBadgeBorder,
-  },
-  dueBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dueBadgeTextAlert: {
-    color: COLORS.dueBadgeText,
-  },
-  dueBadgeTextClear: {
-    color: COLORS.clearBadgeText,
-  },
-  cardDetails: {
-    flexDirection: 'row',
-    gap: SPACING.lg,
-  },
-  detailText: {
-    ...FONTS.bodySecondary,
+  seeAllText: {
+    ...TYPOGRAPHY.labelSmall,
     fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '700',
   },
-  centered: {
+  statsRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    marginBottom: SPACING.lg,
+  },
+  statCardItem: {
     flex: 1,
+    paddingHorizontal: 4,
+  },
+  recentList: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+  },
+  recentCustomerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    minHeight: TOUCH_TARGETS.minHeight,
+  },
+  recentMeta: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  recentName: {
+    ...TYPOGRAPHY.label,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  recentDate: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  emptyRecentCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  emptyRecentText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    color: COLORS.textMuted,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  emptyAddCustBtn: {
+    minHeight: TOUCH_TARGETS.minHeight,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  emptyContainer: {
-    flex: 1,
+  emptyAddCustBtnText: {
+    ...TYPOGRAPHY.label,
+    fontSize: 15,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  loadingContainer: {
+    padding: SPACING.xl,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xxxl,
-  },
-  emptyTitle: {
-    ...FONTS.header,
-    marginTop: SPACING.md,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    ...FONTS.bodySecondary,
-    textAlign: 'center',
-    marginTop: SPACING.xs,
-    marginBottom: SPACING.xl,
-  },
-  addCustomerEmptyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
-    borderRadius: RADIUS.pill,
-    gap: SPACING.sm,
-  },
-  addCustomerEmptyBtnText: {
-    ...FONTS.body,
-    fontWeight: '600',
-    color: COLORS.textInverted,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: SPACING.xxl,
-    right: SPACING.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
-    borderRadius: RADIUS.pill,
-    gap: SPACING.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  fabText: {
-    ...FONTS.body,
-    fontWeight: '600',
-    color: COLORS.textInverted,
   },
 });

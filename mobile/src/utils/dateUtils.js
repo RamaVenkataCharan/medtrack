@@ -49,6 +49,33 @@ export function formatLocalDateTime(dateString) {
   return `${dateStr}, ${timeStr}`;
 }
 
+export function formatDate(dateString) {
+  if (!dateString) return '';
+  let normalized = dateString;
+  if (typeof dateString === 'string' && !dateString.includes('Z') && !dateString.includes('+')) {
+    normalized = dateString.replace(' ', 'T') + 'Z';
+  }
+  const date = new Date(normalized);
+  if (isNaN(date.getTime())) return String(dateString);
+
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+export function calculateDaysLeft(dateString) {
+  if (!dateString) return null;
+  const target = new Date(dateString);
+  if (isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  const diffTime = target.getTime() - today.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
 export function getCurrentLocalIso() {
   return new Date().toISOString();
 }
