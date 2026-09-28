@@ -86,6 +86,16 @@ export default function RemindersScreen({ navigation }) {
     { key: 'all', label: 'All', count: reminders.length },
   ];
 
+  const primaryLicence = reminders.find((r) => r.type === 'pharmacist') || reminders.find((r) => r.type === 'shop') || reminders[0];
+  const bannerTitle = primaryLicence
+    ? primaryLicence.title
+    : 'No Active Licences Configured';
+  const bannerDescription = primaryLicence
+    ? (primaryLicence.is_expired
+        ? `Licence expired on ${primaryLicence.valid_till || primaryLicence.due_date}. Immediate renewal is required.`
+        : `Valid till ${primaryLicence.valid_till || primaryLicence.due_date} (${primaryLicence.days_left != null ? primaryLicence.days_left : 0} days remaining). Advance alert active.`)
+    : 'Add your pharmacist or shop licence validity date in Settings to receive automated renewal reminders.';
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -108,20 +118,22 @@ export default function RemindersScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* In-App Expiry Notification Alert Banner (Screen 16 in roadmap) */}
+      {/* In-App Expiry Notification Alert Banner */}
       <View style={styles.notificationBanner}>
         <View style={styles.bannerIconWrap}>
-          <Ionicons name="shield-half" size={24} color={COLORS.primary} />
+          <Ionicons
+            name={primaryLicence?.is_expired ? 'alert-circle' : 'shield-checkmark'}
+            size={24}
+            color={primaryLicence?.is_expired ? COLORS.error : COLORS.primary}
+          />
         </View>
         <View style={styles.bannerContent}>
           <View style={styles.bannerHeaderRow}>
             <Text style={styles.bannerAppName}>MedTrack Notification</Text>
-            <Text style={styles.bannerTime}>Now</Text>
+            <Text style={styles.bannerTime}>Live Status</Text>
           </View>
-          <Text style={styles.bannerTitle}>Pharmacist Licence Active</Text>
-          <Text style={styles.bannerDescription}>
-            Your registered pharmacist licence is valid till 31 Dec 2026. Configured advance notice will alert you before renewal is due.
-          </Text>
+          <Text style={styles.bannerTitle}>{bannerTitle}</Text>
+          <Text style={styles.bannerDescription}>{bannerDescription}</Text>
         </View>
       </View>
 

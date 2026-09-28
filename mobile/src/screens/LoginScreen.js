@@ -150,7 +150,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
   const handleOpenPrivacy = () => {
     Alert.alert(
       'MedTrack Privacy Policy',
-      'MedTrack stores customer records and ledger entries with end-to-end encrypted cloud backup. We never sell, track, or share your medical ledger data with third parties.',
+      'MedTrack stores customer records and ledger entries with encrypted TLS transit and strict row-level security (RLS) multi-tenant cloud storage. We never sell, track, or share your medical ledger data with third parties.',
       [{ text: 'Close', style: 'cancel' }]
     );
   };

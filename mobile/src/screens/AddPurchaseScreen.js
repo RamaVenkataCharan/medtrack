@@ -125,12 +125,15 @@ export default function AddPurchaseScreen({ route, navigation }) {
 
   // Calculations
   const calculatedTotal = medicines.reduce((sum, item) => {
-    const qty = parseInt(item.quantity, 10) || 1;
-    const price = parseFloat(item.unit_price) || 0;
+    const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
+    const price = Math.max(0, parseFloat(item.unit_price) || 0);
     return sum + qty * price;
   }, 0);
 
-  const parsedPaid = parseFloat(amountPaid) || calculatedTotal;
+  // If amountPaid is empty, default to full payment (calculatedTotal); if explicitly 0, keep 0
+  const parsedPaid = amountPaid.trim() === ''
+    ? calculatedTotal
+    : Math.max(0, parseFloat(amountPaid) || 0);
   const calculatedDue = Math.max(0, calculatedTotal - parsedPaid);
 
   const handleSave = async () => {
@@ -140,10 +143,10 @@ export default function AddPurchaseScreen({ route, navigation }) {
     }
 
     const validMeds = medicines
-      .filter((m) => m.name.trim().length > 0)
+      .filter((m) => (m.name || '').trim().length > 0)
       .map((m) => {
-        const qty = parseInt(m.quantity, 10) || 1;
-        const uPrice = parseFloat(m.unit_price) || 0;
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const uPrice = Math.max(0, parseFloat(m.unit_price) || 0);
         return {
           name: m.name.trim(),
           quantity: qty,
@@ -155,8 +158,27 @@ export default function AddPurchaseScreen({ route, navigation }) {
       });
 
     if (validMeds.length === 0 && calculatedTotal === 0) {
-      const msg = 'Please enter at least one medicine or amount.';
+      const msg = 'Please enter at least one medicine or purchase amount.';
       Platform.OS === 'web' ? alert(msg) : Alert.alert('Empty Purchase', msg);
+      return;
+    }
+
+    for (const m of validMeds) {
+      if (m.quantity < 1) {
+        const msg = `Quantity for "${m.name}" must be at least 1.`;
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Quantity', msg);
+        return;
+      }
+      if (m.unit_price < 0) {
+        const msg = `Rate for "${m.name}" cannot be negative.`;
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Rate', msg);
+        return;
+      }
+    }
+
+    if (parsedPaid < 0) {
+      const msg = 'Amount paid cannot be negative.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Payment', msg);
       return;
     }
 
@@ -180,7 +202,9 @@ export default function AddPurchaseScreen({ route, navigation }) {
       });
     } catch (err) {
       console.warn('Error saving purchase:', err);
-      Alert.alert('Save Failed', err.message || 'Could not save purchase entry');
+      const errMsg = err.message || 'Could not save purchase entry. Please check your connection and try again.';
+      Platform.OS === 'web' ? alert(`Save Failed: ${errMsg}`) : Alert.alert('Save Failed', errMsg);
+      // Notice: Form state is completely preserved so user does not lose entered data!
     } finally {
       setSaving(false);
     }

@@ -1,6 +1,7 @@
 -- ====================================================================
 -- MedTrack Mobile & Web Consolidated Supabase Postgres Schema
 -- Full multi-tenant schema with mandatory Row Level Security (RLS)
+-- Enforces cross-tenant composite foreign keys and non-negative constraints
 -- Each authenticated user (pharmacist) has isolated access via auth.uid()
 -- ====================================================================
 
@@ -9,13 +10,15 @@ CREATE TABLE IF NOT EXISTS public.customers (
   customer_id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   phone_number VARCHAR(20) NOT NULL,
-  name VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL CHECK (length(trim(name)) > 0),
   village VARCHAR(255) DEFAULT '',
   address TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
   deleted_at TIMESTAMPTZ DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT uq_user_customer_phone UNIQUE (user_id, phone_number)
+  CONSTRAINT uq_user_customer_phone UNIQUE (user_id, phone_number),
+  CONSTRAINT uq_user_customer_id UNIQUE (user_id, customer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_user_id ON public.customers(user_id);
@@ -26,28 +29,38 @@ CREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone_number)
 CREATE TABLE IF NOT EXISTS public.entries (
   entry_id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  customer_id BIGINT NOT NULL REFERENCES public.customers(customer_id) ON DELETE CASCADE,
+  customer_id BIGINT NOT NULL,
   entry_date TIMESTAMPTZ DEFAULT NOW(),
-  total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-  amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0,
-  due_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+  amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
+  due_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (due_amount >= 0),
+  notes TEXT DEFAULT '',
+  deleted_at TIMESTAMPTZ DEFAULT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_user_entry_id UNIQUE (user_id, entry_id),
+  CONSTRAINT fk_entries_customer FOREIGN KEY (user_id, customer_id)
+    REFERENCES public.customers(user_id, customer_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_user_id ON public.entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_entries_customer_id ON public.entries(customer_id);
+CREATE INDEX IF NOT EXISTS idx_entries_deleted_at ON public.entries(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_entries_date ON public.entries(entry_date DESC);
 
 -- 3. Entry Medicines (Purchase Line Items) Table
 CREATE TABLE IF NOT EXISTS public.entry_medicines (
   id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  entry_id BIGINT NOT NULL REFERENCES public.entries(entry_id) ON DELETE CASCADE,
-  medicine_name VARCHAR(255) NOT NULL,
-  price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  entry_id BIGINT NOT NULL,
+  medicine_name VARCHAR(255) NOT NULL CHECK (length(trim(medicine_name)) > 0),
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
+  unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+  price NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (price >= 0),
   original_price NUMERIC(10, 2) DEFAULT NULL,
-  discount_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  discount_percent NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (discount_percent >= 0 AND discount_percent <= 100),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT fk_entry_meds_entry FOREIGN KEY (user_id, entry_id)
+    REFERENCES public.entries(user_id, entry_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_entry_meds_user_id ON public.entry_medicines(user_id);
@@ -73,11 +86,13 @@ CREATE TABLE IF NOT EXISTS public.shop_profile (
 CREATE TABLE IF NOT EXISTS public.payments (
   payment_id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  customer_id BIGINT NOT NULL REFERENCES public.customers(customer_id) ON DELETE CASCADE,
+  customer_id BIGINT NOT NULL,
   pay_date TIMESTAMPTZ DEFAULT NOW(),
-  amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (amount > 0),
   note TEXT DEFAULT '',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT fk_payments_customer FOREIGN KEY (user_id, customer_id)
+    REFERENCES public.customers(user_id, customer_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
@@ -85,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_customer_id ON public.payments(customer_
 
 -- Compatibility view for backend scripts referencing singular entry_medicine
 CREATE OR REPLACE VIEW public.entry_medicine AS
-SELECT id, user_id, entry_id, medicine_name, price, original_price, discount_percent, created_at
+SELECT id, user_id, entry_id, medicine_name, quantity, unit_price, price, original_price, discount_percent, created_at
 FROM public.entry_medicines;
 
 -- ====================================================================

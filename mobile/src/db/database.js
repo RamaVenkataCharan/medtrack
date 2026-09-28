@@ -228,19 +228,22 @@ export async function searchCustomers(query = '') {
 
     return results.sort((a, b) => new Date(b.last_activity) - new Date(a.last_activity));
   } catch (err) {
-    console.warn('searchCustomers cloud notice, falling back:', err.message);
-    const active = demoStore.customers.filter((c) => !c.deleted_at);
-    return active.map((c) => ({
-      customer_id: c.customer_id,
-      phone_number: c.phone_number,
-      name: c.name,
-      village: c.village || '',
-      address: c.address || '',
-      created_at: c.created_at,
-      deleted_at: c.deleted_at,
-      total_due: calculateCustomerTotalDue(c.entries || []),
-      last_activity: c.created_at,
-    }));
+    if (await isDemoSession()) {
+      console.warn('searchCustomers demo notice:', err.message);
+      const active = demoStore.customers.filter((c) => !c.deleted_at);
+      return active.map((c) => ({
+        customer_id: c.customer_id,
+        phone_number: c.phone_number,
+        name: c.name,
+        village: c.village || '',
+        address: c.address || '',
+        created_at: c.created_at,
+        deleted_at: c.deleted_at,
+        total_due: calculateCustomerTotalDue(c.entries || []),
+        last_activity: c.created_at,
+      }));
+    }
+    throw err;
   }
 }
 
@@ -261,6 +264,7 @@ export async function getCustomerById(customerId) {
       name: found.name,
       village: found.village || '',
       address: found.address || '',
+      notes: found.notes || '',
       created_at: found.created_at,
       deleted_at: found.deleted_at,
       total_due: calculateCustomerTotalDue(found.entries || []),
@@ -278,6 +282,7 @@ export async function getCustomerById(customerId) {
         name,
         village,
         address,
+        notes,
         created_at,
         deleted_at,
         entries (
@@ -301,26 +306,30 @@ export async function getCustomerById(customerId) {
       name: data.name,
       village: data.village || '',
       address: data.address || '',
+      notes: data.notes || '',
       created_at: data.created_at,
       deleted_at: data.deleted_at,
       total_due: totalDue,
       total_entries: custEntries.length,
     };
   } catch (err) {
-    console.warn('getCustomerById cloud notice, falling back:', err.message);
-    const found = demoStore.customers.find((c) => c.customer_id === numericId);
-    if (!found) return null;
-    return {
-      customer_id: found.customer_id,
-      phone_number: found.phone_number,
-      name: found.name,
-      village: found.village || '',
-      address: found.address || '',
-      created_at: found.created_at,
-      deleted_at: found.deleted_at,
-      total_due: calculateCustomerTotalDue(found.entries || []),
-      total_entries: (found.entries || []).length,
-    };
+    if (await isDemoSession()) {
+      const found = demoStore.customers.find((c) => c.customer_id === numericId);
+      if (!found) return null;
+      return {
+        customer_id: found.customer_id,
+        phone_number: found.phone_number,
+        name: found.name,
+        village: found.village || '',
+        address: found.address || '',
+        notes: found.notes || '',
+        created_at: found.created_at,
+        deleted_at: found.deleted_at,
+        total_due: calculateCustomerTotalDue(found.entries || []),
+        total_entries: (found.entries || []).length,
+      };
+    }
+    throw err;
   }
 }
 
@@ -350,16 +359,18 @@ export async function getCustomerByPhone(phoneNumber) {
     if (error) throw error;
     return data || null;
   } catch (err) {
-    console.warn('getCustomerByPhone cloud notice, falling back:', err.message);
-    const found = demoStore.customers.find((c) => c.phone_number === cleaned && !c.deleted_at);
-    return found || null;
+    if (await isDemoSession()) {
+      const found = demoStore.customers.find((c) => c.phone_number === cleaned && !c.deleted_at);
+      return found || null;
+    }
+    throw err;
   }
 }
 
 /**
  * Adds a new customer under the current user's tenant
  */
-export async function addCustomer({ name, phone_number, village, address }) {
+export async function addCustomer({ name, phone_number, village, address, notes }) {
   await NetworkService.assertOnline();
   const cleanedPhone = cleanPhoneNumber(phone_number);
   const now = getCurrentLocalIso();
@@ -371,6 +382,7 @@ export async function addCustomer({ name, phone_number, village, address }) {
       name: (name || '').trim(),
       village: (village || '').trim(),
       address: (address || '').trim(),
+      notes: (notes || '').trim(),
       created_at: now,
       deleted_at: null,
       entries: [],
@@ -389,6 +401,7 @@ export async function addCustomer({ name, phone_number, village, address }) {
         name: (name || '').trim(),
         village: (village || '').trim(),
         address: (address || '').trim(),
+        notes: (notes || '').trim(),
         created_at: now,
         deleted_at: null,
       })
@@ -398,19 +411,23 @@ export async function addCustomer({ name, phone_number, village, address }) {
     if (error) throw error;
     return data.customer_id;
   } catch (err) {
-    console.warn('addCustomer cloud notice, falling back:', err.message);
-    const newCust = {
-      customer_id: demoStore.nextCustomerId++,
-      phone_number: cleanedPhone,
-      name: (name || '').trim(),
-      village: (village || '').trim(),
-      address: (address || '').trim(),
-      created_at: now,
-      deleted_at: null,
-      entries: [],
-    };
-    demoStore.customers.unshift(newCust);
-    return newCust.customer_id;
+    if (await isDemoSession()) {
+      console.warn('addCustomer demo fallback notice:', err.message);
+      const newCust = {
+        customer_id: demoStore.nextCustomerId++,
+        phone_number: cleanedPhone,
+        name: (name || '').trim(),
+        village: (village || '').trim(),
+        address: (address || '').trim(),
+        notes: (notes || '').trim(),
+        created_at: now,
+        deleted_at: null,
+        entries: [],
+      };
+      demoStore.customers.unshift(newCust);
+      return newCust.customer_id;
+    }
+    throw new Error('Failed to create customer: ' + (err.message || 'Database error'));
   }
 }
 
@@ -446,10 +463,12 @@ export async function softDeleteCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    console.warn('softDeleteCustomer cloud notice, falling back:', err.message);
-    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-    if (cust) cust.deleted_at = now;
-    return true;
+    if (await isDemoSession()) {
+      const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+      if (cust) cust.deleted_at = now;
+      return true;
+    }
+    throw new Error('Failed to move customer to Recycle Bin: ' + (err.message || 'Database error'));
   }
 }
 
@@ -479,10 +498,12 @@ export async function restoreCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    console.warn('restoreCustomer cloud notice, falling back:', err.message);
-    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-    if (cust) cust.deleted_at = null;
-    return true;
+    if (await isDemoSession()) {
+      const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+      if (cust) cust.deleted_at = null;
+      return true;
+    }
+    throw new Error('Failed to restore customer: ' + (err.message || 'Database error'));
   }
 }
 
@@ -511,10 +532,12 @@ export async function permanentDeleteCustomer(customerId) {
     if (error) throw error;
     return true;
   } catch (err) {
-    console.warn('permanentDeleteCustomer cloud notice, falling back:', err.message);
-    demoStore.customers = demoStore.customers.filter((c) => c.customer_id !== numericId);
-    demoStore.entries = demoStore.entries.filter((e) => e.customer_id !== numericId);
-    return true;
+    if (await isDemoSession()) {
+      demoStore.customers = demoStore.customers.filter((c) => c.customer_id !== numericId);
+      demoStore.entries = demoStore.entries.filter((e) => e.customer_id !== numericId);
+      return true;
+    }
+    throw new Error('Failed to permanently delete customer: ' + (err.message || 'Database error'));
   }
 }
 
@@ -579,20 +602,23 @@ export async function getDeletedCustomers() {
       };
     });
   } catch (err) {
-    console.warn('getDeletedCustomers cloud notice, falling back:', err.message);
-    return demoStore.customers
-      .filter((c) => c.deleted_at)
-      .map((c) => ({
-        customer_id: c.customer_id,
-        phone_number: c.phone_number,
-        name: c.name,
-        village: c.village || '',
-        address: c.address || '',
-        created_at: c.created_at,
-        deleted_at: c.deleted_at,
-        total_due: calculateCustomerTotalDue(c.entries || []),
-        total_entries: (c.entries || []).length,
-      }));
+    if (await isDemoSession()) {
+      return demoStore.customers
+        .filter((c) => c.deleted_at)
+        .map((c) => ({
+          customer_id: c.customer_id,
+          phone_number: c.phone_number,
+          name: c.name,
+          village: c.village || '',
+          address: c.address || '',
+          created_at: c.created_at,
+          deleted_at: c.deleted_at,
+          total_due: calculateCustomerTotalDue(c.entries || []),
+          total_entries: (c.entries || []).length,
+        }));
+    }
+    console.error('getDeletedCustomers failed:', err.message);
+    throw new Error('Failed to retrieve deleted customers from cloud: ' + err.message);
   }
 }
 
@@ -611,10 +637,13 @@ export async function getDeletedCustomerCount() {
       .eq('user_id', userId)
       .not('deleted_at', 'is', null);
 
-    if (error) return demoStore.customers.filter((c) => c.deleted_at).length;
+    if (error) throw error;
     return count || 0;
-  } catch {
-    return demoStore.customers.filter((c) => c.deleted_at).length;
+  } catch (err) {
+    if (await isDemoSession()) {
+      return demoStore.customers.filter((c) => c.deleted_at).length;
+    }
+    throw err;
   }
 }
 
@@ -627,7 +656,7 @@ export async function getCustomerLedger(customerId) {
   if (!numericId) return [];
 
   if (await isDemoSession()) {
-    const found = demoStore.entries.filter((e) => e.customer_id === numericId);
+    const found = demoStore.entries.filter((e) => e.customer_id === numericId && !e.deleted_at);
     return found.map((entry) => ({
       entry_id: entry.entry_id,
       customer_id: entry.customer_id,
@@ -635,6 +664,7 @@ export async function getCustomerLedger(customerId) {
       total_amount: parseFloat(entry.total_amount) || 0,
       amount_paid: parseFloat(entry.amount_paid) || 0,
       due_amount: parseFloat(entry.due_amount) || 0,
+      notes: entry.notes || '',
       medicines: (entry.medicines || []).map((m) => ({
         id: m.id,
         entry_id: entry.entry_id,
@@ -642,6 +672,8 @@ export async function getCustomerLedger(customerId) {
         price: parseFloat(m.price) || 0,
         original_price: m.original_price != null ? parseFloat(m.original_price) : null,
         discount_percent: parseFloat(m.discount_percent) || 0,
+        quantity: m.quantity != null ? parseInt(m.quantity, 10) : 1,
+        unit_price: m.unit_price != null ? parseFloat(m.unit_price) : parseFloat(m.price) || 0,
       })),
     }));
   }
@@ -657,17 +689,22 @@ export async function getCustomerLedger(customerId) {
         total_amount,
         amount_paid,
         due_amount,
+        notes,
+        deleted_at,
         entry_medicines (
           id,
           entry_id,
           medicine_name,
           price,
           original_price,
-          discount_percent
+          discount_percent,
+          quantity,
+          unit_price
         )
       `)
       .eq('user_id', userId)
       .eq('customer_id', numericId)
+      .is('deleted_at', null)
       .order('entry_date', { ascending: false });
 
     if (error) throw error;
@@ -679,6 +716,7 @@ export async function getCustomerLedger(customerId) {
       total_amount: parseFloat(entry.total_amount) || 0,
       amount_paid: parseFloat(entry.amount_paid) || 0,
       due_amount: parseFloat(entry.due_amount) || 0,
+      notes: entry.notes || '',
       medicines: (entry.entry_medicines || []).map((m) => ({
         id: m.id,
         entry_id: m.entry_id,
@@ -686,39 +724,47 @@ export async function getCustomerLedger(customerId) {
         price: parseFloat(m.price) || 0,
         original_price: m.original_price != null ? parseFloat(m.original_price) : null,
         discount_percent: parseFloat(m.discount_percent) || 0,
+        quantity: m.quantity != null ? parseInt(m.quantity, 10) : 1,
+        unit_price: m.unit_price != null ? parseFloat(m.unit_price) : (parseFloat(m.price) || 0),
       })),
     }));
   } catch (err) {
-    console.warn('getCustomerLedger cloud notice, falling back:', err.message);
-    const found = demoStore.entries.filter((e) => e.customer_id === numericId);
-    return found.map((entry) => ({
-      entry_id: entry.entry_id,
-      customer_id: entry.customer_id,
-      entry_date: entry.entry_date,
-      total_amount: parseFloat(entry.total_amount) || 0,
-      amount_paid: parseFloat(entry.amount_paid) || 0,
-      due_amount: parseFloat(entry.due_amount) || 0,
-      medicines: (entry.medicines || []).map((m) => ({
-        id: m.id,
+    if (await isDemoSession()) {
+      const found = demoStore.entries.filter((e) => e.customer_id === numericId && !e.deleted_at);
+      return found.map((entry) => ({
         entry_id: entry.entry_id,
-        medicine_name: m.medicine_name,
-        price: parseFloat(m.price) || 0,
-        original_price: m.original_price != null ? parseFloat(m.original_price) : null,
-        discount_percent: parseFloat(m.discount_percent) || 0,
-      })),
-    }));
+        customer_id: entry.customer_id,
+        entry_date: entry.entry_date,
+        total_amount: parseFloat(entry.total_amount) || 0,
+        amount_paid: parseFloat(entry.amount_paid) || 0,
+        due_amount: parseFloat(entry.due_amount) || 0,
+        notes: entry.notes || '',
+        medicines: (entry.medicines || []).map((m) => ({
+          id: m.id,
+          entry_id: entry.entry_id,
+          medicine_name: m.medicine_name,
+          price: parseFloat(m.price) || 0,
+          original_price: m.original_price != null ? parseFloat(m.original_price) : null,
+          discount_percent: parseFloat(m.discount_percent) || 0,
+          quantity: m.quantity != null ? parseInt(m.quantity, 10) : 1,
+          unit_price: m.unit_price != null ? parseFloat(m.unit_price) : parseFloat(m.price) || 0,
+        })),
+      }));
+    }
+    console.error('getCustomerLedger cloud error:', err.message);
+    throw new Error('Failed to retrieve ledger from cloud: ' + err.message);
   }
 }
 
 /**
- * Records a multi-medicine purchase entry in Supabase
+ * Records a multi-medicine purchase entry in Supabase with atomic rollback
  */
-export async function addPurchaseEntry({ customerId, medicines = [], totalAmount = 0, amountPaid = 0 }) {
+export async function addPurchaseEntry({ customerId, medicines = [], totalAmount = 0, amountPaid = 0, notes = '' }) {
   await NetworkService.assertOnline();
   const numericId = parseInt(customerId, 10);
   const now = getCurrentLocalIso();
-  const parsedTotal = parseFloat(totalAmount) || 0;
-  const parsedPaid = parseFloat(amountPaid) || 0;
+  const parsedTotal = Math.max(0, parseFloat(totalAmount) || 0);
+  const parsedPaid = Math.max(0, parseFloat(amountPaid) || 0);
   const dueAmount = calculateEntryDue(parsedTotal, parsedPaid);
 
   if (await isDemoSession()) {
@@ -729,13 +775,22 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
       total_amount: parsedTotal,
       amount_paid: parsedPaid,
       due_amount: dueAmount,
-      medicines: medicines.map((m) => ({
-        id: demoStore.nextMedId++,
-        medicine_name: (m.name || m.medicine_name || '').trim(),
-        price: parseFloat(m.price) || 0,
-        original_price: m.original_price != null ? parseFloat(m.original_price) : parseFloat(m.price) || 0,
-        discount_percent: parseFloat(m.discount_percent) || 0,
-      })),
+      notes: (notes || '').trim(),
+      deleted_at: null,
+      medicines: medicines.map((m) => {
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const linePrice = Math.max(0, parseFloat(m.price) || 0);
+        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (linePrice / qty);
+        return {
+          id: demoStore.nextMedId++,
+          medicine_name: (m.name || m.medicine_name || '').trim(),
+          price: linePrice,
+          original_price: m.original_price != null ? parseFloat(m.original_price) : linePrice,
+          discount_percent: parseFloat(m.discount_percent) || 0,
+          quantity: qty,
+          unit_price: unitPrice,
+        };
+      }),
     };
     demoStore.entries.unshift(newEntry);
     const cust = demoStore.customers.find((c) => c.customer_id === numericId);
@@ -757,6 +812,7 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
         total_amount: parsedTotal,
         amount_paid: parsedPaid,
         due_amount: dueAmount,
+        notes: (notes || '').trim() || null,
       })
       .select('entry_id')
       .single();
@@ -769,9 +825,11 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
       .filter((m) => (m.name || m.medicine_name || '').trim())
       .map((m) => {
         const name = (m.name || m.medicine_name).trim();
-        const medPrice = parseFloat(m.price) || 0;
-        const origPrice = m.original_price != null ? parseFloat(m.original_price) : medPrice;
-        const discPct = m.discount_percent != null ? parseFloat(m.discount_percent) : 0;
+        const medPrice = Math.max(0, parseFloat(m.price) || 0);
+        const origPrice = m.original_price != null ? Math.max(0, parseFloat(m.original_price)) : medPrice;
+        const discPct = m.discount_percent != null ? Math.max(0, parseFloat(m.discount_percent)) : 0;
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (medPrice / qty);
 
         return {
           user_id: userId,
@@ -780,52 +838,62 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
           price: medPrice,
           original_price: origPrice,
           discount_percent: discPct,
+          quantity: qty,
+          unit_price: unitPrice,
         };
       });
 
     if (validMeds.length > 0) {
       const { error: medErr } = await supabase.from('entry_medicines').insert(validMeds);
       if (medErr) {
-        console.warn('Supabase addPurchaseEntry medicines warning:', medErr.message);
+        console.error('Supabase addPurchaseEntry medicines error, rolling back entry:', medErr.message);
+        // Atomic rollback: remove the orphaned entry so ledger and medicines never disagree
+        await supabase.from('entries').delete().eq('entry_id', insertedEntryId).eq('user_id', userId);
+        throw new Error('Failed to record purchase medicines. Ledger entry was rolled back to maintain consistency: ' + medErr.message);
       }
     }
 
     return insertedEntryId;
   } catch (err) {
-    console.warn('addPurchaseEntry cloud notice, falling back:', err.message);
-    const newEntry = {
-      entry_id: demoStore.nextEntryId++,
-      customer_id: numericId,
-      entry_date: now,
-      total_amount: parsedTotal,
-      amount_paid: parsedPaid,
-      due_amount: dueAmount,
-      medicines: medicines.map((m) => ({
-        id: demoStore.nextMedId++,
-        medicine_name: (m.name || m.medicine_name || '').trim(),
-        price: parseFloat(m.price) || 0,
-        original_price: m.original_price != null ? parseFloat(m.original_price) : parseFloat(m.price) || 0,
-        discount_percent: parseFloat(m.discount_percent) || 0,
-      })),
-    };
-    demoStore.entries.unshift(newEntry);
-    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-    if (cust) {
-      if (!cust.entries) cust.entries = [];
-      cust.entries.unshift({ entry_id: newEntry.entry_id, due_amount: dueAmount, entry_date: now });
+    if (await isDemoSession()) {
+      const newEntry = {
+        entry_id: demoStore.nextEntryId++,
+        customer_id: numericId,
+        entry_date: now,
+        total_amount: parsedTotal,
+        amount_paid: parsedPaid,
+        due_amount: dueAmount,
+        notes: (notes || '').trim(),
+        deleted_at: null,
+        medicines: medicines.map((m) => ({
+          id: demoStore.nextMedId++,
+          medicine_name: (m.name || m.medicine_name || '').trim(),
+          price: Math.max(0, parseFloat(m.price) || 0),
+          original_price: m.original_price != null ? parseFloat(m.original_price) : parseFloat(m.price) || 0,
+          discount_percent: parseFloat(m.discount_percent) || 0,
+          quantity: Math.max(1, parseInt(m.quantity, 10) || 1),
+          unit_price: m.unit_price != null ? parseFloat(m.unit_price) : (parseFloat(m.price) || 0),
+        })),
+      };
+      demoStore.entries.unshift(newEntry);
+      return newEntry.entry_id;
     }
-    return newEntry.entry_id;
+    console.error('addPurchaseEntry cloud error:', err.message);
+    throw new Error('Failed to record purchase in cloud: ' + err.message);
   }
 }
 
 /**
- * Records a standalone payment towards existing dues
+ * Records a standalone payment towards existing dues and logs to payments table
  */
 export async function addDuePayment({ customerId, amountPaid }) {
   await NetworkService.assertOnline();
   const numericId = parseInt(customerId, 10);
   const now = getCurrentLocalIso();
-  const parsedPaid = parseFloat(amountPaid) || 0;
+  const parsedPaid = Math.max(0, parseFloat(amountPaid) || 0);
+  if (parsedPaid <= 0) {
+    throw new Error('Payment amount must be greater than zero.');
+  }
   const dueAmount = calculatePaymentDue(parsedPaid);
 
   if (await isDemoSession()) {
@@ -837,6 +905,7 @@ export async function addDuePayment({ customerId, amountPaid }) {
       amount_paid: parsedPaid,
       due_amount: dueAmount,
       medicines: [],
+      deleted_at: null,
     };
     demoStore.entries.unshift(newEntry);
     const cust = demoStore.customers.find((c) => c.customer_id === numericId);
@@ -863,25 +932,39 @@ export async function addDuePayment({ customerId, amountPaid }) {
       .single();
 
     if (error) throw error;
+
+    // Dual record in payments table for audit & ledger compliance
+    const { error: payErr } = await supabase
+      .from('payments')
+      .insert({
+        user_id: userId,
+        customer_id: numericId,
+        amount: parsedPaid,
+        payment_date: now,
+        notes: 'Payment towards customer dues',
+      });
+    if (payErr) {
+      console.warn('Payment entry created in ledger, payments audit notice:', payErr.message);
+    }
+
     return data.entry_id;
   } catch (err) {
-    console.warn('addDuePayment cloud notice, falling back:', err.message);
-    const newEntry = {
-      entry_id: demoStore.nextEntryId++,
-      customer_id: numericId,
-      entry_date: now,
-      total_amount: 0,
-      amount_paid: parsedPaid,
-      due_amount: dueAmount,
-      medicines: [],
-    };
-    demoStore.entries.unshift(newEntry);
-    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
-    if (cust) {
-      if (!cust.entries) cust.entries = [];
-      cust.entries.unshift({ entry_id: newEntry.entry_id, due_amount: dueAmount, entry_date: now });
+    if (await isDemoSession()) {
+      const newEntry = {
+        entry_id: demoStore.nextEntryId++,
+        customer_id: numericId,
+        entry_date: now,
+        total_amount: 0,
+        amount_paid: parsedPaid,
+        due_amount: dueAmount,
+        medicines: [],
+        deleted_at: null,
+      };
+      demoStore.entries.unshift(newEntry);
+      return newEntry.entry_id;
     }
-    return newEntry.entry_id;
+    console.error('addDuePayment cloud error:', err.message);
+    throw new Error('Failed to record payment in cloud: ' + err.message);
   }
 }
 
@@ -991,14 +1074,17 @@ export async function saveShopProfile(profile = {}) {
     if (error) throw error;
     return data;
   } catch (err) {
-    console.warn('saveShopProfile cloud notice, falling back:', err.message);
-    demoStore.shopProfile = { ...demoStore.shopProfile, ...profile, updated_at: now };
-    return demoStore.shopProfile;
+    if (await isDemoSession()) {
+      demoStore.shopProfile = { ...demoStore.shopProfile, ...profile, updated_at: now };
+      return demoStore.shopProfile;
+    }
+    console.error('saveShopProfile cloud error:', err.message);
+    throw new Error('Failed to save shop profile to cloud: ' + err.message);
   }
 }
 
 /**
- * Exports complete JSON backup directly from Supabase
+ * Exports complete JSON backup directly from Supabase including customers, entries, medicines, payments, and profile
  */
 export async function exportAllData() {
   await NetworkService.assertOnline();
@@ -1014,6 +1100,7 @@ export async function exportAllData() {
       customers: demoStore.customers,
       entries: demoStore.entries,
       entryMedicines: [],
+      payments: [],
       shopProfile: demoStore.shopProfile,
     };
   }
@@ -1048,6 +1135,17 @@ export async function exportAllData() {
 
   if (medsErr) throw new Error('Export failed to read medicines: ' + medsErr.message);
 
+  // 4. Fetch all payments
+  const { data: payments, error: paymentsErr } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('user_id', userId)
+    .order('payment_id', { ascending: true });
+
+  if (paymentsErr) {
+    console.warn('Export payments notice:', paymentsErr.message);
+  }
+
   const formattedCustomers = (rawCustomers || []).map((c) => ({
     ...c,
     is_deleted: Boolean(c.deleted_at),
@@ -1064,7 +1162,182 @@ export async function exportAllData() {
     customers: formattedCustomers,
     entries: entries || [],
     entryMedicines: entryMedicines || [],
+    payments: payments || [],
     shopProfile,
+  };
+}
+
+/**
+ * Restores ledger records from a verified JSON backup with duplicate prevention and relationship mapping
+ */
+export async function restoreFromBackup(backupData) {
+  await NetworkService.assertOnline();
+  if (!backupData || (!Array.isArray(backupData.customers) && !Array.isArray(backupData.entries))) {
+    throw new Error('Invalid backup file format. Expected a valid MedTrack JSON backup.');
+  }
+
+  if (await isDemoSession()) {
+    demoStore.customers = backupData.customers || [];
+    demoStore.entries = backupData.entries || [];
+    if (backupData.shopProfile) demoStore.shopProfile = backupData.shopProfile;
+    return {
+      customersRestored: demoStore.customers.length,
+      entriesRestored: demoStore.entries.length,
+      medicinesRestored: 0,
+      paymentsRestored: (backupData.payments || []).length,
+    };
+  }
+
+  const userId = await getAuthUserId();
+  const customerIdMap = new Map(); // old_id -> new_id
+  const entryIdMap = new Map(); // old_id -> new_id
+
+  let customersRestored = 0;
+  let entriesRestored = 0;
+  let medicinesRestored = 0;
+  let paymentsRestored = 0;
+
+  // 1. Existing customers for duplicate checking
+  const { data: existingCustomers } = await supabase
+    .from('customers')
+    .select('customer_id, phone_number')
+    .eq('user_id', userId);
+
+  const phoneToCustomerMap = new Map(
+    (existingCustomers || []).map((c) => [c.phone_number, c.customer_id])
+  );
+
+  // 2. Restore or link customers
+  for (const cust of backupData.customers || []) {
+    const rawPhone = cust.phone_number || '';
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    let resolvedCustomerId = phoneToCustomerMap.get(cleanPhone);
+
+    if (!resolvedCustomerId) {
+      const { data: newCust, error: insertCustErr } = await supabase
+        .from('customers')
+        .insert({
+          user_id: userId,
+          phone_number: cleanPhone,
+          name: (cust.name || 'Unnamed Customer').trim(),
+          village: (cust.village || '').trim(),
+          address: (cust.address || '').trim(),
+          notes: (cust.notes || '').trim() || null,
+          deleted_at: cust.deleted_at || null,
+        })
+        .select('customer_id')
+        .single();
+
+      if (insertCustErr) {
+        console.error('Failed restoring customer:', cust.name, insertCustErr.message);
+        continue;
+      }
+      resolvedCustomerId = newCust.customer_id;
+      phoneToCustomerMap.set(cleanPhone, resolvedCustomerId);
+      customersRestored++;
+    }
+
+    if (cust.customer_id) {
+      customerIdMap.set(cust.customer_id, resolvedCustomerId);
+    }
+  }
+
+  // 3. Restore entries
+  for (const entry of backupData.entries || []) {
+    const mappedCustomerId = customerIdMap.get(entry.customer_id);
+    if (!mappedCustomerId) continue;
+
+    const { data: newEntry, error: insertEntryErr } = await supabase
+      .from('entries')
+      .insert({
+        user_id: userId,
+        customer_id: mappedCustomerId,
+        entry_date: entry.entry_date || getCurrentLocalIso(),
+        total_amount: Math.max(0, parseFloat(entry.total_amount) || 0),
+        amount_paid: Math.max(0, parseFloat(entry.amount_paid) || 0),
+        due_amount: calculateEntryDue(parseFloat(entry.total_amount) || 0, parseFloat(entry.amount_paid) || 0),
+        notes: (entry.notes || '').trim() || null,
+        deleted_at: entry.deleted_at || null,
+      })
+      .select('entry_id')
+      .single();
+
+    if (insertEntryErr) {
+      console.error('Failed restoring entry:', insertEntryErr.message);
+      continue;
+    }
+
+    if (entry.entry_id) {
+      entryIdMap.set(entry.entry_id, newEntry.entry_id);
+    }
+    entriesRestored++;
+  }
+
+  // 4. Restore medicines
+  const backupMeds = backupData.entryMedicines || [];
+  if (backupMeds.length > 0) {
+    const medsToInsert = [];
+    for (const med of backupMeds) {
+      const mappedEntryId = entryIdMap.get(med.entry_id);
+      if (!mappedEntryId) continue;
+
+      const qty = Math.max(1, parseInt(med.quantity, 10) || 1);
+      const price = Math.max(0, parseFloat(med.price) || 0);
+      const unitPrice = med.unit_price != null ? Math.max(0, parseFloat(med.unit_price)) : (price / qty);
+
+      medsToInsert.push({
+        user_id: userId,
+        entry_id: mappedEntryId,
+        medicine_name: (med.medicine_name || '').trim(),
+        price,
+        original_price: med.original_price != null ? Math.max(0, parseFloat(med.original_price)) : price,
+        discount_percent: Math.max(0, parseFloat(med.discount_percent) || 0),
+        quantity: qty,
+        unit_price: unitPrice,
+      });
+    }
+
+    if (medsToInsert.length > 0) {
+      const { error: batchMedErr } = await supabase.from('entry_medicines').insert(medsToInsert);
+      if (batchMedErr) {
+        console.error('Failed restoring medicines batch:', batchMedErr.message);
+      } else {
+        medicinesRestored = medsToInsert.length;
+      }
+    }
+  }
+
+  // 5. Restore payments
+  for (const pay of backupData.payments || []) {
+    const mappedCustomerId = customerIdMap.get(pay.customer_id);
+    if (!mappedCustomerId) continue;
+
+    const { error: payErr } = await supabase.from('payments').insert({
+      user_id: userId,
+      customer_id: mappedCustomerId,
+      amount: Math.max(0, parseFloat(pay.amount) || 0),
+      payment_date: pay.payment_date || getCurrentLocalIso(),
+      notes: (pay.notes || '').trim() || null,
+    });
+    if (!payErr) {
+      paymentsRestored++;
+    }
+  }
+
+  // 6. Restore shopProfile if present
+  if (backupData.shopProfile) {
+    try {
+      await saveShopProfile(backupData.shopProfile);
+    } catch (e) {
+      console.warn('Notice restoring shop profile:', e.message);
+    }
+  }
+
+  return {
+    customersRestored,
+    entriesRestored,
+    medicinesRestored,
+    paymentsRestored,
   };
 }
 

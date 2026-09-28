@@ -3,27 +3,29 @@ import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../utils/supabaseClient';
 import { NetworkService } from './networkService';
 
-const MIGRATION_DONE_KEY = 'medtrack_local_data_migrated_v1';
+const getMigrationKey = (userId) => `medtrack_local_data_migrated_v2_${userId || 'anonymous'}`;
 
-async function getMigrationDone() {
+async function getMigrationDone(userId) {
+  const key = getMigrationKey(userId);
   try {
     if (Platform.OS === 'web') {
-      return typeof localStorage !== 'undefined' && localStorage.getItem(MIGRATION_DONE_KEY) === 'true';
+      return typeof localStorage !== 'undefined' && localStorage.getItem(key) === 'true';
     }
-    const val = await SecureStore.getItemAsync(MIGRATION_DONE_KEY);
+    const val = await SecureStore.getItemAsync(key);
     return val === 'true';
   } catch {
     return false;
   }
 }
 
-async function setMigrationDone() {
+async function setMigrationDone(userId) {
+  const key = getMigrationKey(userId);
   try {
     if (Platform.OS === 'web') {
-      if (typeof localStorage !== 'undefined') localStorage.setItem(MIGRATION_DONE_KEY, 'true');
+      if (typeof localStorage !== 'undefined') localStorage.setItem(key, 'true');
       return;
     }
-    await SecureStore.setItemAsync(MIGRATION_DONE_KEY, 'true');
+    await SecureStore.setItemAsync(key, 'true');
   } catch (err) {
     console.warn('Could not save migration flag:', err);
   }
@@ -32,7 +34,8 @@ async function setMigrationDone() {
 export const LocalMigrationService = {
   checkPendingLocalData: async () => {
     try {
-      const alreadyDone = await getMigrationDone();
+      const { data: { user } } = await supabase.auth.getUser();
+      const alreadyDone = await getMigrationDone(user?.id);
       if (alreadyDone) return { hasData: false, count: 0 };
 
       if (Platform.OS === 'web') {
@@ -102,13 +105,14 @@ export const LocalMigrationService = {
     }
 
     if (localCustomers.length === 0) {
-      await setMigrationDone();
-      return { customersMigrated: 0, entriesMigrated: 0 };
+      await setMigrationDone(user.id);
+      return { success: true, customersMigrated: 0, entriesMigrated: 0 };
     }
 
     let customersMigrated = 0;
     let entriesMigrated = 0;
     let medicinesMigrated = 0;
+    const errors = [];
 
     const totalSteps = localCustomers.length;
 
@@ -136,9 +140,10 @@ export const LocalMigrationService = {
           .insert({
             user_id: user.id,
             phone_number: c.phone_number,
-            name: c.name,
+            name: (c.name || 'Unnamed Customer').trim(),
             village: c.village || '',
             address: c.address || '',
+            notes: c.notes || null,
             deleted_at: c.deleted_at || null,
             created_at: c.created_at || new Date().toISOString(),
           })
@@ -146,7 +151,8 @@ export const LocalMigrationService = {
           .single();
 
         if (custErr) {
-          console.warn(`Could not migrate customer ${c.name}:`, custErr.message);
+          console.error(`Could not migrate customer ${c.name}:`, custErr.message);
+          errors.push(`Customer ${c.name}: ${custErr.message}`);
           continue;
         }
         supabaseCustomerId = inserted.customer_id;
@@ -162,15 +168,18 @@ export const LocalMigrationService = {
             user_id: user.id,
             customer_id: supabaseCustomerId,
             entry_date: e.entry_date || new Date().toISOString(),
-            total_amount: parseFloat(e.total_amount) || 0,
-            amount_paid: parseFloat(e.amount_paid) || 0,
-            due_amount: parseFloat(e.due_amount) || 0,
+            total_amount: Math.max(0, parseFloat(e.total_amount) || 0),
+            amount_paid: Math.max(0, parseFloat(e.amount_paid) || 0),
+            due_amount: Math.max(0, parseFloat(e.due_amount) || 0),
+            notes: e.notes || null,
+            deleted_at: e.deleted_at || null,
           })
           .select('entry_id')
           .single();
 
         if (entryErr) {
-          console.warn('Could not migrate entry:', entryErr.message);
+          console.error('Could not migrate entry:', entryErr.message);
+          errors.push(`Entry for customer ${c.name}: ${entryErr.message}`);
           continue;
         }
         entriesMigrated++;
@@ -178,18 +187,28 @@ export const LocalMigrationService = {
         // Migrate medicine line items for this entry
         const entryMeds = localMedicines.filter((m) => m.entry_id === e.entry_id);
         if (entryMeds.length > 0) {
-          const medPayload = entryMeds.map((m) => ({
-            user_id: user.id,
-            entry_id: insertedEntry.entry_id,
-            medicine_name: m.medicine_name,
-            price: parseFloat(m.price) || 0,
-            original_price: m.original_price != null ? parseFloat(m.original_price) : null,
-            discount_percent: m.discount_percent != null ? parseFloat(m.discount_percent) : 0,
-          }));
+          const medPayload = entryMeds.map((m) => {
+            const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+            const price = Math.max(0, parseFloat(m.price) || 0);
+            const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (price / qty);
+            return {
+              user_id: user.id,
+              entry_id: insertedEntry.entry_id,
+              medicine_name: (m.medicine_name || '').trim(),
+              price,
+              original_price: m.original_price != null ? Math.max(0, parseFloat(m.original_price)) : price,
+              discount_percent: Math.max(0, parseFloat(m.discount_percent) || 0),
+              quantity: qty,
+              unit_price: unitPrice,
+            };
+          });
 
           const { error: medErr } = await supabase.from('entry_medicines').insert(medPayload);
           if (!medErr) {
             medicinesMigrated += entryMeds.length;
+          } else {
+            console.error('Could not migrate entry medicines:', medErr.message);
+            errors.push(`Medicines for entry ${insertedEntry.entry_id}: ${medErr.message}`);
           }
         }
       }
@@ -216,10 +235,16 @@ export const LocalMigrationService = {
       }
     }
 
-    await setMigrationDone();
+    // Only set migration done if there were zero unrecoverable record errors
+    if (errors.length === 0) {
+      await setMigrationDone(user.id);
+    } else {
+      console.warn(`Migration completed with ${errors.length} errors; done flag NOT set to allow retry.`);
+    }
 
     return {
-      success: true,
+      success: errors.length === 0,
+      errors,
       customersMigrated,
       entriesMigrated,
       medicinesMigrated,

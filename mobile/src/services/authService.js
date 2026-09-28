@@ -160,7 +160,7 @@ export class AuthService {
         await safeSecureStoreSet('refresh_token', supabaseSession.refresh_token);
         await safeSecureStoreSet(
           'demo_user',
-          JSON.stringify({ id: supabaseUser.id, phone: phoneNumber })
+          JSON.stringify({ id: supabaseUser.id, phone: cleanId })
         );
 
         const sessionObj = { user: supabaseUser, access_token: supabaseSession.access_token };
@@ -174,11 +174,12 @@ export class AuthService {
         };
       }
 
-      // If test OTP was provided (000000, 123456) or test number
-      if (VALID_TEST_OTPS.includes(cleanOtp) || DEMO_PHONES.includes(phoneNumber)) {
+      // If test OTP was provided in development or for recognized demo phones
+      const isDevOrDemo = Boolean(typeof __DEV__ !== 'undefined' && __DEV__) || DEMO_PHONES.includes(cleanId);
+      if (isDevOrDemo && (VALID_TEST_OTPS.includes(cleanOtp) || DEMO_PHONES.includes(cleanId))) {
         const testUser = {
-          id: formatMockUUID(phoneNumber),
-          phone: phoneNumber,
+          id: formatMockUUID(cleanId),
+          phone: cleanId,
           role: 'pharmacist',
           is_demo: true,
           app_metadata: { provider: 'phone' },
@@ -251,10 +252,17 @@ export class AuthService {
 
       if (error) {
         console.warn('Supabase signInWithOtp notice:', error.message);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          return {
+            success: true,
+            data,
+            message: `Dev mode: Use test OTP 123456 or 000000 to log in. (${error.message})`,
+          };
+        }
         return {
-          success: true,
-          data,
-          message: `Dev mode: Use test OTP 123456 or 000000 to log in. (${error.message})`,
+          success: false,
+          error: error.message,
+          message: error.message || 'Could not send verification OTP. Please try again.',
         };
       }
 
@@ -320,7 +328,8 @@ export class AuthService {
         };
       }
 
-      if (VALID_TEST_OTPS.includes(cleanOtp) || cleanEmail.includes('demo') || cleanEmail.includes('test')) {
+      const isDevOrDemo = Boolean(typeof __DEV__ !== 'undefined' && __DEV__) || cleanEmail.includes('demo') || cleanEmail.includes('test');
+      if (isDevOrDemo && (VALID_TEST_OTPS.includes(cleanOtp) || cleanEmail.includes('demo') || cleanEmail.includes('test'))) {
         const testUser = {
           id: cleanEmail === 'demo@medtrack.com' ? '00000000-0000-0000-0000-000000000001' : formatMockUUID(cleanEmail),
           email: cleanEmail,
