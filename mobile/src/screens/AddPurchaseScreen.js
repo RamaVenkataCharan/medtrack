@@ -144,10 +144,10 @@ export default function AddPurchaseScreen({ route, navigation }) {
           <TouchableOpacity
             style={styles.headerIconBtn}
             onPress={() => navigation.navigate('Settings')}
-            accessibilityLabel="Settings"
+            accessibilityLabel="Profile & Settings"
             activeOpacity={0.7}
           >
-            <Ionicons name="settings-outline" size={17} color={COLORS.textSecondary} />
+            <Ionicons name="person-outline" size={17} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 

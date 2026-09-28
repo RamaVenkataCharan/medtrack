@@ -5,6 +5,7 @@ import {
   TextInput,
   FlatList,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   StyleSheet,
   StatusBar,
   ActivityIndicator,
@@ -30,6 +31,7 @@ export default function HomeScreen({ navigation }) {
   const [exporting, setExporting] = useState(false);
   const [userPhone, setUserPhone] = useState('');
   const [deletedCount, setDeletedCount] = useState(0);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   useEffect(() => {
     AuthService.getCurrentUser().then((user) => {
@@ -113,9 +115,22 @@ export default function HomeScreen({ navigation }) {
     }
   }, [query]);
 
+  // Dismiss profile dropdown on Web Escape key press
+  useEffect(() => {
+    if (!isProfileMenuOpen || Platform.OS !== 'web') return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isProfileMenuOpen]);
+
   // Reload when screen regains focus or query changes
   useFocusEffect(
     useCallback(() => {
+      setIsProfileMenuOpen(false);
       loadData();
     }, [loadData])
   );
@@ -186,12 +201,12 @@ export default function HomeScreen({ navigation }) {
         <View style={{ flex: 1, marginRight: SPACING.xs }}>
           <Text style={styles.appTitle}>MedTrack</Text>
           <Text style={styles.appSubtitle} numberOfLines={1}>
-            {userPhone ? `Pharmacist: ${userPhone}` : `Medical Khata Book`}
+            Medical Khata Book
           </Text>
         </View>
 
         <View style={styles.headerActions}>
-          {/* Action 1: Backup */}
+          {/* Action 1: Backup (Unchanged) */}
           <TouchableOpacity
             style={styles.headerBackupBtn}
             onPress={handleExport}
@@ -212,7 +227,10 @@ export default function HomeScreen({ navigation }) {
           {/* Action 2: Recycle Bin */}
           <TouchableOpacity
             style={styles.headerIconBtn}
-            onPress={() => navigation.navigate('RecycleBin')}
+            onPress={() => {
+              setIsProfileMenuOpen(false);
+              navigation.navigate('RecycleBin');
+            }}
             accessibilityLabel="Recycle Bin"
             activeOpacity={0.7}
           >
@@ -222,27 +240,89 @@ export default function HomeScreen({ navigation }) {
             )}
           </TouchableOpacity>
 
-          {/* Action 3: Settings Gear Icon */}
+          {/* Action 3: User Profile Avatar Control */}
           <TouchableOpacity
-            style={styles.headerIconBtn}
-            onPress={() => navigation.navigate('Settings')}
-            accessibilityLabel="Settings"
+            style={[
+              styles.headerAvatarBtn,
+              isProfileMenuOpen && styles.headerAvatarBtnActive,
+            ]}
+            onPress={() => setIsProfileMenuOpen((prev) => !prev)}
+            accessibilityLabel="User Profile Menu"
+            accessibilityRole="button"
+            accessibilityExpanded={isProfileMenuOpen}
             activeOpacity={0.7}
           >
-            <Ionicons name="settings-outline" size={17} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-
-          {/* Action 4: Logout */}
-          <TouchableOpacity
-            style={[styles.headerIconBtn, styles.headerLogoutBtn]}
-            onPress={handleLogout}
-            accessibilityLabel="Logout"
-            activeOpacity={0.7}
-          >
-            <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
+            <Ionicons
+              name="person-outline"
+              size={18}
+              color={isProfileMenuOpen ? COLORS.primary : COLORS.textPrimary}
+            />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Floating User Profile Dropdown Menu */}
+      {isProfileMenuOpen && (
+        <>
+          <TouchableWithoutFeedback onPress={() => setIsProfileMenuOpen(false)}>
+            <View style={styles.menuBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={[styles.profileDropdown, { top: topPadding + 44 }]} accessibilityRole="menu">
+            {/* 1. My Profile */}
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setIsProfileMenuOpen(false);
+                navigation.navigate('Settings', { initialSection: 'profile' });
+              }}
+              accessibilityRole="menuitem"
+              accessibilityLabel="My Profile"
+              activeOpacity={0.7}
+            >
+              <View style={styles.dropdownItemIconWrap}>
+                <Ionicons name="person-outline" size={17} color={COLORS.textPrimary} />
+              </View>
+              <Text style={styles.dropdownItemText}>My Profile</Text>
+            </TouchableOpacity>
+
+            {/* 2. Account Settings */}
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setIsProfileMenuOpen(false);
+                navigation.navigate('Settings', { initialSection: 'settings' });
+              }}
+              accessibilityRole="menuitem"
+              accessibilityLabel="Account Settings"
+              activeOpacity={0.7}
+            >
+              <View style={styles.dropdownItemIconWrap}>
+                <Ionicons name="settings-outline" size={17} color={COLORS.textPrimary} />
+              </View>
+              <Text style={styles.dropdownItemText}>Account Settings</Text>
+            </TouchableOpacity>
+
+            <View style={styles.dropdownDivider} />
+
+            {/* 3. Logout */}
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setIsProfileMenuOpen(false);
+                handleLogout();
+              }}
+              accessibilityRole="menuitem"
+              accessibilityLabel="Logout"
+              activeOpacity={0.7}
+            >
+              <View style={styles.dropdownItemIconWrap}>
+                <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
+              </View>
+              <Text style={[styles.dropdownItemText, styles.dropdownLogoutText]}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       {/* Auto-focused Large Search Box */}
       <View style={styles.searchContainer}>
@@ -369,9 +449,78 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
-  headerLogoutBtn: {
-    backgroundColor: COLORS.dangerLight,
-    borderColor: '#FCA5A5',
+  headerAvatarBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  headerAvatarBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
+  },
+  menuBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 998,
+  },
+  profileDropdown: {
+    position: 'absolute',
+    right: SPACING.xl,
+    width: 195,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: SPACING.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
+    zIndex: 999,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm,
+    marginHorizontal: 4,
+  },
+  dropdownItemIconWrap: {
+    width: 22,
+    marginRight: SPACING.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownItemText: {
+    ...FONTS.body,
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.textPrimary,
+  },
+  dropdownLogoutText: {
+    color: COLORS.danger,
+    fontWeight: '600',
+  },
+  dropdownDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 4,
+    marginHorizontal: SPACING.xs,
   },
   actionBadgeDot: {
     position: 'absolute',

@@ -206,10 +206,10 @@ export default function CustomerProfileScreen({ route, navigation }) {
           <TouchableOpacity
             onPress={() => navigation.navigate('Settings')}
             style={styles.headerSettingsBtn}
-            accessibilityLabel="Settings"
+            accessibilityLabel="Profile & Settings"
             activeOpacity={0.7}
           >
-            <Ionicons name="settings-outline" size={18} color={COLORS.textSecondary} />
+            <Ionicons name="person-outline" size={18} color={COLORS.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleDeleteCustomer}
