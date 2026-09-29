@@ -130,40 +130,48 @@ export default function RecycleBinScreen({ navigation }) {
     const deletedDateStr = item.deleted_at ? formatDate(item.deleted_at) : 'Recently';
 
     return (
-      <View style={styles.card}>
+      <View testID={`recycle-cust-card-${item.customer_id}`} style={styles.card}>
         <View style={styles.cardHeader}>
-          <Avatar name={item.name} size={46} />
+          <Avatar name={item.name} size={40} />
           <View style={styles.customerMeta}>
-            <Text style={styles.customerName}>{item.name}</Text>
-            <Text style={styles.customerPhone}>{item.phone_number || 'No phone'}</Text>
-            <Text style={styles.deletedDate}>Deleted {deletedDateStr}</Text>
+            <Text style={styles.customerName} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+              {item.name}
+            </Text>
+            <Text style={styles.customerPhone} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+              {item.phone_number || 'No phone'}
+            </Text>
+            <Text style={styles.deletedDate} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+              Deleted {deletedDateStr}
+            </Text>
           </View>
           <View style={styles.daysBadge}>
-            <Text style={styles.daysText}>{daysLeft} days left</Text>
+            <Text style={styles.daysText} maxFontSizeMultiplier={1.3}>{daysLeft} days left</Text>
           </View>
         </View>
 
         <View style={styles.cardActions}>
           <TouchableOpacity
+            testID={`recycle-cust-restore-${item.customer_id}`}
             style={styles.restoreBtn}
             onPress={() => handleOpenRestoreConfirm(item)}
             activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel={`Restore ${item.name}`}
           >
-            <Ionicons name="refresh" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
-            <Text style={styles.restoreBtnText}>Restore</Text>
+            <Ionicons name="refresh" size={15} color={COLORS.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.restoreBtnText} maxFontSizeMultiplier={1.3}>Restore</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
+            testID={`recycle-cust-delete-${item.customer_id}`}
             style={styles.permDeleteBtn}
             onPress={() => handleOpenPermDeleteConfirm(item)}
             activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel={`Permanently delete ${item.name}`}
           >
-            <Ionicons name="trash-bin" size={16} color={COLORS.error} style={{ marginRight: 4 }} />
-            <Text style={styles.permDeleteBtnText}>Delete Permanently</Text>
+            <Ionicons name="trash-bin" size={15} color={COLORS.error} style={{ marginRight: 4 }} />
+            <Text style={styles.permDeleteBtnText} maxFontSizeMultiplier={1.3}>Delete Permanently</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -177,40 +185,46 @@ export default function RecycleBinScreen({ navigation }) {
     const meds = item.medicines || [];
 
     return (
-      <View style={styles.card}>
+      <View testID={`recycle-pur-card-${item.entry_id}`} style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.purchaseIconBox}>
-            <Ionicons name="receipt" size={22} color={COLORS.primary} />
+            <Ionicons name="receipt" size={18} color={COLORS.primary} />
           </View>
           <View style={styles.customerMeta}>
-            <Text style={styles.customerName}>{item.customer_name || 'Customer'}</Text>
-            <Text style={styles.customerPhone}>
+            <Text style={styles.customerName} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+              {item.customer_name || 'Customer'}
+            </Text>
+            <Text style={styles.customerPhone} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
               {meds.length} medicines • ₹{amount.toFixed(0)}
             </Text>
-            <Text style={styles.deletedDate}>Deleted {deletedDateStr}</Text>
+            <Text style={styles.deletedDate} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+              Deleted {deletedDateStr}
+            </Text>
           </View>
           <View style={styles.daysBadge}>
-            <Text style={styles.daysText}>{daysLeft} days left</Text>
+            <Text style={styles.daysText} maxFontSizeMultiplier={1.3}>{daysLeft} days left</Text>
           </View>
         </View>
 
         <View style={styles.cardActions}>
           <TouchableOpacity
+            testID={`recycle-pur-restore-${item.entry_id}`}
             style={styles.restoreBtn}
             onPress={() => handleOpenRestoreConfirm(item)}
             activeOpacity={0.8}
           >
-            <Ionicons name="refresh" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
-            <Text style={styles.restoreBtnText}>Restore</Text>
+            <Ionicons name="refresh" size={15} color={COLORS.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.restoreBtnText} maxFontSizeMultiplier={1.3}>Restore</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
+            testID={`recycle-pur-delete-${item.entry_id}`}
             style={styles.permDeleteBtn}
             onPress={() => handleOpenPermDeleteConfirm(item)}
             activeOpacity={0.8}
           >
-            <Ionicons name="trash-bin" size={16} color={COLORS.error} style={{ marginRight: 4 }} />
-            <Text style={styles.permDeleteBtnText}>Delete Permanently</Text>
+            <Ionicons name="trash-bin" size={15} color={COLORS.error} style={{ marginRight: 4 }} />
+            <Text style={styles.permDeleteBtnText} maxFontSizeMultiplier={1.3}>Delete Permanently</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -221,20 +235,22 @@ export default function RecycleBinScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity
+          testID="recycle-back-btn"
           style={styles.backButton}
           onPress={() => navigation.goBack()}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Recycle Bin</Text>
-        <View style={{ width: 44 }} />
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Recycle Bin</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       {/* 2-Tab Navigation: Customers (N) | Purchases (N) */}
       <View style={styles.tabBar}>
         <TouchableOpacity
+          testID="recycle-tab-customers"
           style={[styles.tabItem, activeTab === 'customers' && styles.tabItemActive]}
           onPress={() => setActiveTab('customers')}
           accessibilityRole="tab"
@@ -245,12 +261,14 @@ export default function RecycleBinScreen({ navigation }) {
               styles.tabText,
               activeTab === 'customers' && styles.tabTextActive,
             ]}
+            maxFontSizeMultiplier={1.3}
           >
             Customers ({deletedCustomers.length})
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="recycle-tab-purchases"
           style={[styles.tabItem, activeTab === 'purchases' && styles.tabItemActive]}
           onPress={() => setActiveTab('purchases')}
           accessibilityRole="tab"
@@ -261,16 +279,17 @@ export default function RecycleBinScreen({ navigation }) {
               styles.tabText,
               activeTab === 'purchases' && styles.tabTextActive,
             ]}
+            maxFontSizeMultiplier={1.3}
           >
             Purchases ({deletedPurchases.length})
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Information Banner (Screen 10 in roadmap) */}
+      {/* Information Banner */}
       <View style={styles.noticeBanner}>
-        <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} style={{ marginRight: 8 }} />
-        <Text style={styles.noticeText}>
+        <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} style={{ marginRight: 6 }} />
+        <Text style={styles.noticeText} maxFontSizeMultiplier={1.3}>
           Deleted records are kept safely for 30 days. You can restore them anytime.
         </Text>
       </View>
@@ -278,14 +297,14 @@ export default function RecycleBinScreen({ navigation }) {
       {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Checking recycle bin...</Text>
+          <Text style={styles.loadingText} maxFontSizeMultiplier={1.3}>Checking recycle bin...</Text>
         </View>
       ) : activeTab === 'customers' ? (
         deletedCustomers.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Ionicons name="trash-bin-outline" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyTitle}>Recycle Bin Empty</Text>
-            <Text style={styles.emptySubtitle}>No deleted customer records found.</Text>
+            <Ionicons name="trash-bin-outline" size={40} color={COLORS.textMuted} />
+            <Text style={styles.emptyTitle} maxFontSizeMultiplier={1.3}>Recycle Bin Empty</Text>
+            <Text style={styles.emptySubtitle} maxFontSizeMultiplier={1.3}>No deleted customer records found.</Text>
           </View>
         ) : (
           <FlatList
@@ -297,9 +316,9 @@ export default function RecycleBinScreen({ navigation }) {
         )
       ) : deletedPurchases.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="receipt-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyTitle}>No Deleted Purchases</Text>
-          <Text style={styles.emptySubtitle}>No deleted purchase records found.</Text>
+          <Ionicons name="receipt-outline" size={40} color={COLORS.textMuted} />
+          <Text style={styles.emptyTitle} maxFontSizeMultiplier={1.3}>No Deleted Purchases</Text>
+          <Text style={styles.emptySubtitle} maxFontSizeMultiplier={1.3}>No deleted purchase records found.</Text>
         </View>
       ) : (
         <FlatList
@@ -348,12 +367,12 @@ export default function RecycleBinScreen({ navigation }) {
           <View style={styles.successCard}>
             <View style={styles.successOuterGlow}>
               <View style={styles.successIconCircle}>
-                <Ionicons name="checkmark" size={44} color="#FFFFFF" />
+                <Ionicons name="checkmark" size={36} color="#FFFFFF" />
               </View>
             </View>
 
-            <Text style={styles.successTitle}>Customer Restored Successfully!</Text>
-            <Text style={styles.successSubtitle}>
+            <Text style={styles.successTitle} maxFontSizeMultiplier={1.3}>Customer Restored Successfully!</Text>
+            <Text style={styles.successSubtitle} maxFontSizeMultiplier={1.3}>
               <Text style={{ fontWeight: '700', color: COLORS.text }}>
                 {restoredCustomerData?.name}
               </Text>{' '}
@@ -362,6 +381,7 @@ export default function RecycleBinScreen({ navigation }) {
 
             <View style={styles.successActions}>
               <TouchableOpacity
+                testID="recycle-success-view-btn"
                 style={styles.successPrimaryBtn}
                 onPress={() => {
                   setSuccessModalVisible(false);
@@ -370,10 +390,11 @@ export default function RecycleBinScreen({ navigation }) {
                   });
                 }}
               >
-                <Text style={styles.successPrimaryText}>View Customer</Text>
+                <Text style={styles.successPrimaryText} maxFontSizeMultiplier={1.3}>View Customer</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
+                testID="recycle-success-add-purchase-btn"
                 style={styles.successSecondaryBtn}
                 onPress={() => {
                   setSuccessModalVisible(false);
@@ -383,7 +404,7 @@ export default function RecycleBinScreen({ navigation }) {
                   });
                 }}
               >
-                <Text style={styles.successSecondaryText}>+ Add New Purchase</Text>
+                <Text style={styles.successSecondaryText} maxFontSizeMultiplier={1.3}>+ Add New Purchase</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -416,22 +437,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
-    paddingBottom: SPACING.sm,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
+    paddingBottom: 8,
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   backButton: {
-    width: TOUCH_TARGETS.minWidth,
-    height: TOUCH_TARGETS.minHeight,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'flex-start',
   },
   headerTitle: {
     ...TYPOGRAPHY.h2,
-    fontSize: 20,
+    fontSize: 18,
     color: COLORS.text,
     fontWeight: '700',
   },
@@ -443,9 +464,9 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     flex: 1,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: TOUCH_TARGETS.minHeight,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
@@ -454,7 +475,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     ...TYPOGRAPHY.label,
-    fontSize: 15,
+    fontSize: 13,
     color: COLORS.textSecondary,
     fontWeight: '500',
   },
@@ -466,10 +487,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: '#F8B4A2',
@@ -477,19 +498,19 @@ const styles = StyleSheet.create({
   noticeText: {
     flex: 1,
     ...TYPOGRAPHY.caption,
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.text,
-    lineHeight: 18,
+    lineHeight: 16,
   },
   listContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+    padding: 16,
+    paddingBottom: 16,
   },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
+    padding: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -498,88 +519,88 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   purchaseIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   customerMeta: {
     flex: 1,
-    marginLeft: SPACING.md,
+    marginLeft: 8,
   },
   customerName: {
     ...TYPOGRAPHY.label,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.text,
   },
   customerPhone: {
     ...TYPOGRAPHY.caption,
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 1,
   },
   deletedDate: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
   daysBadge: {
     backgroundColor: '#FDECE7',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: '#F8B4A2',
   },
   daysText: {
     ...TYPOGRAPHY.labelSmall,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: COLORS.error,
   },
   cardActions: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginTop: SPACING.md,
-    paddingTop: SPACING.sm,
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
   restoreBtn: {
     flex: 1,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.primaryLight,
-    minHeight: 40,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
   restoreBtnText: {
     ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.primary,
     fontWeight: '700',
   },
   permDeleteBtn: {
     flex: 1,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFF5F5',
-    minHeight: 40,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: '#FEB2B2',
   },
   permDeleteBtnText: {
     ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.error,
     fontWeight: '600',
   },
@@ -587,30 +608,30 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    padding: 16,
   },
   loadingText: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginTop: SPACING.md,
+    marginTop: 8,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xxl,
+    padding: 24,
   },
   emptyTitle: {
     ...TYPOGRAPHY.h3,
-    fontSize: 18,
+    fontSize: 16,
     color: COLORS.text,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.xs,
+    marginTop: 8,
+    marginBottom: 4,
   },
   emptySubtitle: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
+    fontSize: 13,
     color: COLORS.textSecondary,
     textAlign: 'center',
   },
@@ -619,62 +640,62 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.lg,
+    padding: 16,
   },
   successCard: {
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 360,
     backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
+    borderRadius: RADIUS.lg,
+    padding: 16,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
   },
   successOuterGlow: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SPACING.md,
-    borderWidth: 4,
+    marginBottom: 8,
+    borderWidth: 3,
     borderColor: '#F8B4A2',
   },
   successIconCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   successTitle: {
     ...TYPOGRAPHY.h2,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     color: COLORS.text,
     textAlign: 'center',
-    marginBottom: SPACING.xs,
+    marginBottom: 4,
   },
   successSubtitle: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
+    fontSize: 13,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    marginBottom: SPACING.xl,
-    lineHeight: 22,
+    marginBottom: 16,
+    lineHeight: 18,
   },
   successActions: {
     width: '100%',
-    gap: SPACING.sm,
+    gap: 8,
   },
   successPrimaryBtn: {
-    minHeight: TOUCH_TARGETS.minHeight,
+    height: 48,
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.md,
     justifyContent: 'center',
@@ -682,12 +703,12 @@ const styles = StyleSheet.create({
   },
   successPrimaryText: {
     ...TYPOGRAPHY.label,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   successSecondaryBtn: {
-    minHeight: TOUCH_TARGETS.minHeight,
+    height: 48,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
     borderWidth: 1,
@@ -697,7 +718,7 @@ const styles = StyleSheet.create({
   },
   successSecondaryText: {
     ...TYPOGRAPHY.label,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: COLORS.textSecondary,
   },

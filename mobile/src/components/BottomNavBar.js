@@ -19,49 +19,12 @@ export default function BottomNavBar({ currentRoute = 'Home', navigation }) {
       outlineIcon: 'people-outline',
       target: 'CustomerSearch',
     },
-    {
-      name: 'AddPurchase',
-      label: 'Record',
-      isCenterAction: true,
-      target: 'AddPurchase',
-    },
-    {
-      name: 'Medicines',
-      label: 'Medicines',
-      icon: 'medkit',
-      outlineIcon: 'medkit-outline',
-      target: 'MedicinesSearch',
-    },
-    {
-      name: 'More',
-      label: 'More',
-      icon: 'grid',
-      outlineIcon: 'grid-outline',
-      target: 'More',
-    },
   ];
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.container}>
         {tabs.map((tab) => {
-          if (tab.isCenterAction) {
-            return (
-              <View key="center-fab" style={styles.centerFabContainer}>
-                <TouchableOpacity
-                  style={styles.centerFabButton}
-                  onPress={() => navigation?.navigate?.(tab.target)}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityLabel="Record new purchase"
-                  accessibilityHint="Navigates to screen to record a customer medicine purchase"
-                >
-                  <Ionicons name="add" size={30} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-            );
-          }
-
           const isActive = currentRoute === tab.name;
 
           return (
@@ -113,8 +76,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    height: 64,
-    paddingHorizontal: SPACING.xs,
+    height: 56,
+    paddingHorizontal: SPACING.xl,
   },
   tabButton: {
     flex: 1,
@@ -127,26 +90,5 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.labelSmall,
     fontSize: 12,
     marginTop: 2,
-  },
-  centerFabContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: -20,
-  },
-  centerFabButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 6,
-    borderWidth: 3,
-    borderColor: COLORS.surface,
   },
 });

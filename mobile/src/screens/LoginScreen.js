@@ -11,12 +11,11 @@ import {
   Platform,
   StyleSheet,
   StatusBar,
-  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthService } from '../services/authService';
-import { COLORS, SPACING, RADIUS, FONTS } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, FONTS, INPUT_HEIGHT, MAX_FONT_SCALE } from '../constants/theme';
 
 // Strict dev-only check: only active in local development builds (__DEV__ is true and not production)
 // In EAS preview, production, or release builds, __DEV__ is false, completely stripping this UI
@@ -181,10 +180,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
           {/* Header Branding with Terracotta 'M' Monogram */}
           <View style={styles.brandContainer}>
             <View style={styles.monogramBadge}>
-              <Text style={styles.monogramLetter}>M</Text>
+              <Text style={styles.monogramLetter} maxFontSizeMultiplier={MAX_FONT_SCALE}>M</Text>
             </View>
-            <Text style={styles.appName}>MedTrack</Text>
-            <Text style={styles.appTagline}>Pharmacist Ledger & Due Management</Text>
+            <Text style={styles.appName} maxFontSizeMultiplier={MAX_FONT_SCALE}>MedTrack</Text>
+            <Text style={styles.appTagline} maxFontSizeMultiplier={MAX_FONT_SCALE}>Pharmacist Ledger & Due Management</Text>
           </View>
 
           {/* Form Card */}
@@ -194,6 +193,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 {/* Segmented Mode Selector: Sign In vs Sign Up */}
                 <View style={styles.segmentContainer}>
                   <TouchableOpacity
+                    testID="login-mode-signin-tab"
                     style={[
                       styles.segmentTab,
                       authMode === 'signin' && styles.segmentTabActive,
@@ -205,6 +205,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                     activeOpacity={0.8}
                   >
                     <Text
+                      maxFontSizeMultiplier={MAX_FONT_SCALE}
                       style={[
                         styles.segmentText,
                         authMode === 'signin' && styles.segmentTextActive,
@@ -215,6 +216,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    testID="login-mode-signup-tab"
                     style={[
                       styles.segmentTab,
                       authMode === 'signup' && styles.segmentTabActive,
@@ -226,6 +228,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                     activeOpacity={0.8}
                   >
                     <Text
+                      maxFontSizeMultiplier={MAX_FONT_SCALE}
                       style={[
                         styles.segmentText,
                         authMode === 'signup' && styles.segmentTextActive,
@@ -237,10 +240,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 </View>
 
                 {/* Section Header */}
-                <Text style={styles.cardTitle}>
+                <Text style={styles.cardTitle} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                   {authMode === 'signin' ? 'Welcome Back' : 'Register Pharmacy'}
                 </Text>
-                <Text style={styles.cardSubtitle}>
+                <Text style={styles.cardSubtitle} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                   {authMode === 'signin'
                     ? 'Enter your registered email to receive your secure sign-in code.'
                     : 'Create your digital khata book to track store sales, credits, and customer dues.'}
@@ -250,14 +253,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 {error ? (
                   <View style={styles.errorBox}>
                     <Ionicons name="alert-circle" size={17} color={COLORS.danger} style={{ marginRight: 6 }} />
-                    <Text style={styles.errorText}>{error}</Text>
+                    <Text style={styles.errorText} maxFontSizeMultiplier={MAX_FONT_SCALE}>{error}</Text>
                   </View>
                 ) : null}
 
                 {/* Sign Up Only: Pharmacy / Pharmacist Name */}
                 {authMode === 'signup' && (
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Pharmacy or Pharmacist Name *</Text>
+                    <Text style={styles.inputLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>Pharmacy or Pharmacist Name *</Text>
                     <View
                       style={[
                         styles.inputContainer,
@@ -272,6 +275,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                         />
                       </View>
                       <TextInput
+                        testID="login-name-input"
                         style={styles.textInput}
                         placeholder="e.g. MedTrack Pharmacy"
                         placeholderTextColor={COLORS.textTertiary}
@@ -284,6 +288,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                         onBlur={() => setFocusedField(null)}
                         autoCapitalize="words"
                         editable={!loading}
+                        maxFontSizeMultiplier={MAX_FONT_SCALE}
                       />
                     </View>
                   </View>
@@ -291,7 +296,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
 
                 {/* Email Address Input */}
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
+                  <Text style={styles.inputLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                     {authMode === 'signin' ? 'Registered Email Address *' : 'Work Email Address *'}
                   </Text>
                   <View
@@ -308,6 +313,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                       />
                     </View>
                     <TextInput
+                      testID="login-email-input"
                       style={styles.textInput}
                       placeholder="pharmacist@pharmacy.com"
                       placeholderTextColor={COLORS.textTertiary}
@@ -322,12 +328,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                       onFocus={() => setFocusedField('email')}
                       onBlur={() => setFocusedField(null)}
                       editable={!loading}
+                      maxFontSizeMultiplier={MAX_FONT_SCALE}
                     />
                   </View>
                 </View>
 
                 {/* Primary Action Button */}
                 <TouchableOpacity
+                  testID="login-submit-btn"
                   style={[
                     styles.primaryButton,
                     (loading || !email.trim()) && styles.buttonDisabled,
@@ -339,11 +347,11 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   {loading ? (
                     <View style={styles.buttonLoadingRow}>
                       <ActivityIndicator size="small" color={COLORS.textInverted} style={{ marginRight: 8 }} />
-                      <Text style={styles.primaryButtonText}>Sending Secure Code...</Text>
+                      <Text style={styles.primaryButtonText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Sending Secure Code...</Text>
                     </View>
                   ) : (
                     <>
-                      <Text style={styles.primaryButtonText}>
+                      <Text style={styles.primaryButtonText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                         {authMode === 'signin' ? 'Send Sign In Code' : 'Create Account & Send Code'}
                       </Text>
                       <Ionicons name="arrow-forward" size={17} color={COLORS.textInverted} style={{ marginLeft: 6 }} />
@@ -353,6 +361,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
 
                 {/* Mode Switch Helper Link */}
                 <TouchableOpacity
+                  testID="login-toggle-mode-btn"
                   style={styles.modeToggleLink}
                   onPress={() => {
                     setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
@@ -360,11 +369,11 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.modeToggleText}>
+                  <Text style={styles.modeToggleText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                     {authMode === 'signin' ? (
-                      <>New pharmacist? <Text style={styles.modeToggleBold}>Create an account →</Text></>
+                      <>New pharmacist? <Text style={styles.modeToggleBold} maxFontSizeMultiplier={MAX_FONT_SCALE}>Create an account →</Text></>
                     ) : (
-                      <>Already registered? <Text style={styles.modeToggleBold}>Sign in here →</Text></>
+                      <>Already registered? <Text style={styles.modeToggleBold} maxFontSizeMultiplier={MAX_FONT_SCALE}>Sign in here →</Text></>
                     )}
                   </Text>
                 </TouchableOpacity>
@@ -374,19 +383,20 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   <View style={styles.devOnlyContainer}>
                     <View style={styles.devDividerRow}>
                       <View style={styles.devDividerLine} />
-                      <Text style={styles.devDividerText}>LOCAL DEV TEST BYPASS</Text>
+                      <Text style={styles.devDividerText} maxFontSizeMultiplier={MAX_FONT_SCALE}>LOCAL DEV TEST BYPASS</Text>
                       <View style={styles.devDividerLine} />
                     </View>
                     <TouchableOpacity
+                      testID="login-demo-btn"
                       style={styles.demoButton}
                       onPress={handleQuickDemoLogin}
                       disabled={loading}
                       activeOpacity={0.8}
                     >
                       <Ionicons name="flash" size={15} color={COLORS.primary} style={{ marginRight: 6 }} />
-                      <Text style={styles.demoButtonText}>1-Tap Quick Demo Login (demo@medtrack.com)</Text>
+                      <Text style={styles.demoButtonText} maxFontSizeMultiplier={MAX_FONT_SCALE}>1-Tap Quick Demo Login (demo@medtrack.com)</Text>
                     </TouchableOpacity>
-                    <Text style={styles.devHintText}>Development Mode Only • Test OTP: 123456</Text>
+                    <Text style={styles.devHintText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Development Mode Only • Test OTP: 123456</Text>
                   </View>
                 ) : null}
               </>
@@ -394,6 +404,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
               <>
                 {/* Step 2: 6-Digit OTP Verification Screen */}
                 <TouchableOpacity
+                  testID="login-back-to-email-btn"
                   onPress={() => {
                     setStep('email');
                     setOtp('');
@@ -403,26 +414,27 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   activeOpacity={0.7}
                 >
                   <Ionicons name="arrow-back" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
-                  <Text style={styles.backToEmailText}>Change Email</Text>
+                  <Text style={styles.backToEmailText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Change Email</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.cardTitle}>Verify Your Code</Text>
-                <Text style={styles.cardSubtitle}>
+                <Text style={styles.cardTitle} maxFontSizeMultiplier={MAX_FONT_SCALE}>Verify Your Code</Text>
+                <Text style={styles.cardSubtitle} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                   We sent a 6-digit verification code to{'\n'}
-                  <Text style={styles.emailHighlight}>{email}</Text>
+                  <Text style={styles.emailHighlight} maxFontSizeMultiplier={MAX_FONT_SCALE}>{email}</Text>
                 </Text>
 
                 {/* Error Banner */}
                 {error ? (
                   <View style={styles.errorBox}>
                     <Ionicons name="alert-circle" size={17} color={COLORS.danger} style={{ marginRight: 6 }} />
-                    <Text style={styles.errorText}>{error}</Text>
+                    <Text style={styles.errorText} maxFontSizeMultiplier={MAX_FONT_SCALE}>{error}</Text>
                   </View>
                 ) : null}
 
                 {/* Individual 6-Digit OTP Boxes */}
-                <Text style={styles.inputLabel}>Enter 6-Digit Verification Code</Text>
+                <Text style={styles.inputLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>Enter 6-Digit Verification Code</Text>
                 <TouchableOpacity
+                  testID="login-otp-boxes"
                   style={styles.otpBoxesRow}
                   activeOpacity={1}
                   onPress={() => otpInputRef.current?.focus()}
@@ -436,6 +448,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                     return (
                       <View
                         key={index}
+                        testID={`login-otp-box-${index}`}
                         style={[
                           styles.otpBox,
                           isFilled && styles.otpBoxFilled,
@@ -444,6 +457,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                         ]}
                       >
                         <Text
+                          maxFontSizeMultiplier={MAX_FONT_SCALE}
                           style={[
                             styles.otpBoxDigit,
                             isFilled && styles.otpBoxDigitFilled,
@@ -460,6 +474,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 {/* Invisible Native Input Handling Digits */}
                 <TextInput
                   ref={otpInputRef}
+                  testID="login-otp-input"
                   style={styles.hiddenOtpInput}
                   value={otp}
                   onChangeText={(val) => {
@@ -478,23 +493,25 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   {resendCountdown > 0 ? (
                     <View style={styles.countdownBadge}>
                       <Ionicons name="time-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
-                      <Text style={styles.countdownText}>Resend code in {resendCountdown}s</Text>
+                      <Text style={styles.countdownText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Resend code in {resendCountdown}s</Text>
                     </View>
                   ) : (
                     <TouchableOpacity
+                      testID="login-resend-otp-btn"
                       onPress={handleSendOTP}
                       disabled={loading}
                       style={styles.resendActiveBtn}
                       activeOpacity={0.7}
                     >
                       <Ionicons name="refresh-outline" size={14} color={COLORS.primary} style={{ marginRight: 4 }} />
-                      <Text style={styles.resendActiveText}>Resend verification code</Text>
+                      <Text style={styles.resendActiveText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Resend verification code</Text>
                     </TouchableOpacity>
                   )}
                 </View>
 
                 {/* Primary Verify Button */}
                 <TouchableOpacity
+                  testID="login-submit-btn"
                   style={[
                     styles.primaryButton,
                     (loading || otp.length < 6) && styles.buttonDisabled,
@@ -506,11 +523,11 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                   {loading ? (
                     <View style={styles.buttonLoadingRow}>
                       <ActivityIndicator size="small" color={COLORS.textInverted} style={{ marginRight: 8 }} />
-                      <Text style={styles.primaryButtonText}>Verifying Code...</Text>
+                      <Text style={styles.primaryButtonText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Verifying Code...</Text>
                     </View>
                   ) : (
                     <>
-                      <Text style={styles.primaryButtonText}>
+                      <Text style={styles.primaryButtonText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
                         {authMode === 'signin' ? 'Verify & Sign In' : 'Complete Registration'}
                       </Text>
                       <Ionicons name="checkmark-circle" size={18} color={COLORS.textInverted} style={{ marginLeft: 6 }} />
@@ -522,7 +539,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
                 {SHOW_DEV_DEMO ? (
                   <View style={styles.devOtpHint}>
                     <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
-                    <Text style={styles.devHintText}>Dev Mode Test OTP: 123456</Text>
+                    <Text style={styles.devHintText} maxFontSizeMultiplier={MAX_FONT_SCALE}>Dev Mode Test OTP: 123456</Text>
                   </View>
                 ) : null}
               </>
@@ -531,15 +548,15 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
 
           {/* Trust, Security & Compliance Footer */}
           <View style={styles.trustFooter}>
-            <Text style={styles.termsText}>
+            <Text style={styles.termsText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
               By continuing, you agree to MedTrack's{' '}
-              <Text style={styles.termsLink} onPress={handleOpenTerms}>Terms of Service</Text>
+              <Text style={styles.termsLink} onPress={handleOpenTerms} maxFontSizeMultiplier={MAX_FONT_SCALE}>Terms of Service</Text>
               {' '}and{' '}
-              <Text style={styles.termsLink} onPress={handleOpenPrivacy}>Privacy Policy</Text>.
+              <Text style={styles.termsLink} onPress={handleOpenPrivacy} maxFontSizeMultiplier={MAX_FONT_SCALE}>Privacy Policy</Text>.
             </Text>
             <View style={styles.securityBadgeRow}>
               <Ionicons name="shield-checkmark" size={13} color={COLORS.paymentGreen} style={{ marginRight: 5 }} />
-              <Text style={styles.securityBadgeText}>256-Bit SSL Encryption • HIPAA & D&C Act Compliant</Text>
+              <Text style={styles.securityBadgeText} maxFontSizeMultiplier={MAX_FONT_SCALE}>256-Bit SSL Encryption • HIPAA & D&C Act Compliant</Text>
             </View>
           </View>
         </ScrollView>
@@ -558,8 +575,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     justifyContent: 'center',
     maxWidth: 520,
     width: '100%',
@@ -569,31 +586,31 @@ const styles = StyleSheet.create({
   // 1. Branding: Monogram & Titles
   brandContainer: {
     alignItems: 'center',
-    marginBottom: SPACING.xl,
+    marginBottom: 16,
   },
   monogramBadge: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.24,
-    shadowRadius: 10,
-    elevation: 4,
-    marginBottom: SPACING.sm + 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+    marginBottom: 8,
   },
   monogramLetter: {
-    fontSize: 32,
+    fontSize: 26,
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: -1,
   },
   appName: {
     ...FONTS.title,
-    fontSize: 24,
+    fontSize: 22,
     color: COLORS.textPrimary,
     letterSpacing: -0.3,
   },
@@ -607,39 +624,39 @@ const styles = StyleSheet.create({
   // 2. Card Styling
   card: {
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
-    padding: SPACING.xl,
+    borderRadius: 12,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#ECE5DC',
     shadowColor: '#2D231E',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.07,
-    shadowRadius: 20,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
 
   // 3. Segmented Tabs
   segmentContainer: {
     flexDirection: 'row',
     backgroundColor: '#F3EFEA',
-    borderRadius: 12,
-    padding: 3,
-    marginBottom: SPACING.lg,
+    borderRadius: 8,
+    padding: 2,
+    marginBottom: 12,
   },
   segmentTab: {
     flex: 1,
-    paddingVertical: 9,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: 6,
   },
   segmentTabActive: {
     backgroundColor: COLORS.surface,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowRadius: 2,
+    elevation: 1,
   },
   segmentText: {
     fontSize: 13,
@@ -653,7 +670,7 @@ const styles = StyleSheet.create({
 
   cardTitle: {
     ...FONTS.header,
-    fontSize: 19,
+    fontSize: 18,
     color: COLORS.textPrimary,
     marginBottom: 4,
   },
@@ -662,28 +679,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     lineHeight: 18,
-    marginBottom: SPACING.lg,
+    marginBottom: 12,
   },
 
   // 4. Form Inputs
   inputGroup: {
-    marginBottom: SPACING.md,
+    marginBottom: 8,
   },
   inputLabel: {
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginBottom: 6,
+    marginBottom: 4,
     letterSpacing: 0.2,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 48,
+    height: INPUT_HEIGHT,
     backgroundColor: '#FAF8F5',
     borderWidth: 1.2,
     borderColor: '#E8E2D9',
-    borderRadius: 12,
+    borderRadius: 8,
     overflow: 'hidden',
   },
   inputContainerFocused: {
@@ -697,7 +714,7 @@ const styles = StyleSheet.create({
   },
   inputIconWrap: {
     width: 44,
-    height: '100%',
+    height: INPUT_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F5EFE8',
@@ -706,7 +723,8 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    paddingHorizontal: SPACING.md,
+    height: INPUT_HEIGHT,
+    paddingHorizontal: 12,
     fontSize: 15,
     color: COLORS.textPrimary,
     fontWeight: '500',
@@ -715,17 +733,17 @@ const styles = StyleSheet.create({
   // 5. Buttons
   primaryButton: {
     backgroundColor: COLORS.primary,
-    height: 48,
-    borderRadius: 12,
+    height: INPUT_HEIGHT,
+    borderRadius: 8,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: SPACING.xs,
+    marginTop: 4,
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   buttonDisabled: {
     opacity: 0.65,
@@ -746,7 +764,7 @@ const styles = StyleSheet.create({
   // 6. Mode Switch Helper
   modeToggleLink: {
     alignItems: 'center',
-    marginTop: SPACING.md,
+    marginTop: 12,
     paddingVertical: 4,
   },
   modeToggleText: {
@@ -765,10 +783,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.dangerLight,
     borderLeftWidth: 3.5,
     borderLeftColor: COLORS.danger,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    borderRadius: RADIUS.sm,
-    marginBottom: SPACING.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginBottom: 8,
   },
   errorText: {
     fontSize: 12.5,
@@ -781,7 +799,7 @@ const styles = StyleSheet.create({
   backToEmailBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: 12,
     alignSelf: 'flex-start',
   },
   backToEmailText: {
@@ -796,16 +814,16 @@ const styles = StyleSheet.create({
   otpBoxesRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginVertical: SPACING.md,
+    marginVertical: 12,
     gap: 8,
   },
   otpBox: {
     flex: 1,
-    height: 52,
+    height: INPUT_HEIGHT,
     backgroundColor: '#FAF8F5',
     borderWidth: 1.5,
     borderColor: '#E2D9CE',
-    borderRadius: 10,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -827,7 +845,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF2F2',
   },
   otpBoxDigit: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.textSecondary,
   },
@@ -847,7 +865,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: 12,
   },
   countdownBadge: {
     flexDirection: 'row',
@@ -871,18 +889,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: SPACING.md,
+    marginTop: 12,
   },
 
   // 9. Dev-Only Section
   devOnlyContainer: {
-    marginTop: SPACING.lg,
-    paddingTop: SPACING.sm,
+    marginTop: 12,
+    paddingTop: 8,
   },
   devDividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
   },
   devDividerLine: {
     flex: 1,
@@ -894,14 +912,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textTertiary,
     letterSpacing: 0.8,
-    paddingHorizontal: SPACING.sm,
+    paddingHorizontal: 8,
   },
   demoButton: {
     backgroundColor: '#FAF5EE',
     borderWidth: 1.2,
     borderColor: '#DFCBB8',
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: 8,
+    height: INPUT_HEIGHT,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
@@ -921,15 +939,15 @@ const styles = StyleSheet.create({
   // 10. Trust & Compliance Footer
   trustFooter: {
     alignItems: 'center',
-    marginTop: SPACING.xl,
-    paddingHorizontal: SPACING.sm,
+    marginTop: 16,
+    paddingHorizontal: 8,
   },
   termsText: {
     fontSize: 11.5,
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 16,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   termsLink: {
     color: COLORS.primary,

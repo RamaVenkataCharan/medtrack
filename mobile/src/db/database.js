@@ -1,108 +1,40 @@
-import { supabase } from '../utils/supabaseClient';
-import { getCurrentLocalIso } from '../utils/dateUtils';
-import { NetworkService } from '../services/networkService';
-import { AuthService } from '../services/authService';
+import { supabase } from '../utils/supabaseClient.js';
+import { getCurrentLocalIso } from '../utils/dateUtils.js';
+import { NetworkService } from '../services/networkService.js';
+import { AuthService } from '../services/authService.js';
 import {
   cleanPhoneNumber,
   calculateEntryDue,
   calculatePaymentDue,
   calculateCustomerTotalDue,
-} from '../utils/khataLogic';
+} from '../utils/khataLogic.js';
 
 // ─────────────────────────────────────────────────────────────
 // SUPABASE CLOUD DATA ACCESS LAYER (PostgreSQL + Row Level Security)
 // With Seamless In-Memory Sandbox for Local Dev / Test Sessions
 // ─────────────────────────────────────────────────────────────
 
+import { demoStore } from './demoStore.js';
+import { OfflineSyncService } from '../services/offlineSyncService.js';
+
+export { demoStore } from './demoStore.js';
+
 export function getActiveDriverName() {
   return 'SUPABASE_CLOUD (PostgreSQL + Row Level Security)';
 }
-
-// In-Memory Dev / Demo Store for offline/test accounts
-const demoStore = {
-  nextCustomerId: 10,
-  nextEntryId: 20,
-  nextMedId: 30,
-  customers: [
-    {
-      customer_id: 1,
-      phone_number: '9848012345',
-      name: 'Ramesh Patel',
-      village: 'Kompally',
-      address: 'Plot 42, Main Road',
-      created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-      deleted_at: null,
-      entries: [
-        {
-          entry_id: 1,
-          due_amount: 450,
-          total_amount: 850,
-          amount_paid: 400,
-          entry_date: new Date(Date.now() - 86400000 * 2).toISOString(),
-        },
-      ],
-    },
-    {
-      customer_id: 2,
-      phone_number: '9876543210',
-      name: 'Priya Sharma',
-      village: 'Medchal',
-      address: 'House # 12-4',
-      created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-      deleted_at: null,
-      entries: [],
-    },
-  ],
-  entries: [
-    {
-      entry_id: 1,
-      customer_id: 1,
-      entry_date: new Date(Date.now() - 86400000 * 2).toISOString(),
-      total_amount: 850,
-      amount_paid: 400,
-      due_amount: 450,
-      medicines: [
-        {
-          id: 1,
-          medicine_name: 'Paracetamol 650mg',
-          price: 60,
-          original_price: 60,
-          discount_percent: 0,
-        },
-        {
-          id: 2,
-          medicine_name: 'Amoxicillin 500mg',
-          price: 120,
-          original_price: 120,
-          discount_percent: 0,
-        },
-      ],
-    },
-  ],
-  shopProfile: {
-    shop_name: 'MedTrack Pharmacy',
-    shop_license_no: '20B/1234/2024',
-    license_20b: '20B/1234/2024',
-    license_21b: '21B/5678/2024',
-    shop_license_validity: '2028-12-31',
-    shop_phone: '+91 98765 43210',
-    pharmacist_name: 'Charan, B.Pharm',
-    pharmacist_phone: '9848012345',
-    pharmacist_license_validity: '2029-06-30',
-  },
-};
 
 /**
  * Helper to check if current session is demo/test mode
  */
 async function isDemoSession() {
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return true;
   if (!Boolean(typeof __DEV__ !== 'undefined' && __DEV__)) return false;
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id && !session.user.is_demo) return false;
   } catch {}
   const currentUser = await AuthService.getCurrentUser();
-  return Boolean(currentUser && (currentUser.is_demo || !currentUser.aud));
+  return Boolean(!currentUser || currentUser.is_demo || !currentUser.aud);
 }
 
 /**
@@ -131,6 +63,10 @@ async function getAuthUserId(requireAuth = true) {
     return currentUser.id;
   }
 
+  if (await isDemoSession()) {
+    return 'demo-pharmacy-owner-id';
+  }
+
   if (requireAuth) {
     throw new Error('Authentication required. Please log in with your email OTP to access khata data.');
   }
@@ -138,12 +74,22 @@ async function getAuthUserId(requireAuth = true) {
 }
 
 /**
+ * Escapes special characters for Supabase ilike queries to prevent wildcard abuse and syntax errors.
+ */
+function escapeIlikeQuery(str) {
+  return str
+    .replace(/[,()"]/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+    .trim();
+}
+
+/**
  * Searches and lists active customers (excludes soft-deleted customers)
  */
 export async function searchCustomers(query = '') {
   await NetworkService.assertOnline();
-  const userId = await getAuthUserId(false);
-  if (!userId) return [];
 
   if (await isDemoSession()) {
     const trimmed = (query || '').trim().toLowerCase();
@@ -157,8 +103,16 @@ export async function searchCustomers(query = '') {
         )
       : active;
     return matched.map((c) => {
-      const custEntries = c.entries || [];
+      const custEntries = (c.entries || []).filter((e) => !e.deleted_at);
       const totalDue = calculateCustomerTotalDue(custEntries);
+      let lastActivity = c.created_at;
+      if (custEntries.length > 0) {
+        const dates = custEntries.map((e) => new Date(e.entry_date).getTime());
+        const maxDate = Math.max(...dates);
+        if (!isNaN(maxDate)) {
+          lastActivity = new Date(maxDate).toISOString();
+        }
+      }
       return {
         customer_id: c.customer_id,
         phone_number: c.phone_number,
@@ -168,7 +122,8 @@ export async function searchCustomers(query = '') {
         created_at: c.created_at,
         deleted_at: c.deleted_at,
         total_due: totalDue,
-        last_activity: c.created_at,
+        last_activity: lastActivity,
+        last_purchase_date: lastActivity,
       };
     });
   }
@@ -187,7 +142,8 @@ export async function searchCustomers(query = '') {
         entries (
           entry_id,
           due_amount,
-          entry_date
+          entry_date,
+          deleted_at
         )
       `)
       .eq('user_id', userId)
@@ -195,14 +151,17 @@ export async function searchCustomers(query = '') {
 
     const trimmed = (query || '').trim();
     if (trimmed) {
-      req = req.or(`name.ilike.%${trimmed}%,phone_number.ilike.%${trimmed}%,village.ilike.%${trimmed}%`);
+      const escaped = escapeIlikeQuery(trimmed);
+      if (escaped) {
+        req = req.or(`name.ilike.%${escaped}%,phone_number.ilike.%${escaped}%,village.ilike.%${escaped}%`);
+      }
     }
 
     const { data, error } = await req;
     if (error) throw error;
 
     const results = (data || []).map((c) => {
-      const custEntries = c.entries || [];
+      const custEntries = (c.entries || []).filter((e) => !e.deleted_at);
       const totalDue = calculateCustomerTotalDue(custEntries);
 
       let lastActivity = c.created_at;
@@ -224,6 +183,7 @@ export async function searchCustomers(query = '') {
         deleted_at: c.deleted_at,
         total_due: totalDue,
         last_activity: lastActivity,
+        last_purchase_date: lastActivity,
       };
     });
 
@@ -669,17 +629,85 @@ export async function getCustomerLedger(customerId) {
 }
 
 /**
- * Records a multi-medicine purchase entry in Supabase with atomic rollback
+ * Records a multi-medicine purchase entry in Supabase with atomic rollback and offline queuing
  */
-export async function addPurchaseEntry({ customerId, medicines = [], totalAmount = 0, amountPaid = 0, notes = '' }) {
-  await NetworkService.assertOnline();
+export async function addPurchaseEntry({
+  customerId,
+  medicines = [],
+  totalAmount = 0,
+  amountPaid = 0,
+  notes = '',
+  client_mutation_id,
+  isSyncReplay = false,
+}) {
+  const isOnline = await NetworkService.checkConnection();
   const numericId = parseInt(customerId, 10);
   const now = getCurrentLocalIso();
   const parsedTotal = Math.max(0, parseFloat(totalAmount) || 0);
   const parsedPaid = Math.max(0, parseFloat(amountPaid) || 0);
   const dueAmount = calculateEntryDue(parsedTotal, parsedPaid);
 
+  // If offline and not replaying a previous sync, enqueue mutation for background sync
+  if (!isOnline && !isSyncReplay) {
+    const mutationId = client_mutation_id || OfflineSyncService.generateMutationId();
+    await OfflineSyncService.enqueueMutation({
+      type: 'ADD_PURCHASE',
+      payload: { customerId, medicines, totalAmount, amountPaid, notes, client_mutation_id: mutationId },
+    });
+
+    const pendingId = demoStore.nextEntryId++;
+    const pendingEntry = {
+      entry_id: pendingId,
+      customer_id: numericId,
+      entry_date: now,
+      total_amount: parsedTotal,
+      amount_paid: parsedPaid,
+      due_amount: dueAmount,
+      notes: (notes || '').trim(),
+      deleted_at: null,
+      is_pending: true,
+      medicines: medicines.map((m) => {
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const linePrice = Math.max(0, parseFloat(m.price) || 0);
+        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (linePrice / qty);
+        return {
+          id: demoStore.nextMedId++,
+          entry_id: pendingId,
+          medicine_name: (m.name || m.medicine_name || '').trim(),
+          price: linePrice,
+          original_price: m.original_price != null ? parseFloat(m.original_price) : linePrice,
+          discount_percent: parseFloat(m.discount_percent) || 0,
+          quantity: qty,
+          unit: m.unit || 'tablets',
+          unit_price: unitPrice,
+        };
+      }),
+    };
+    demoStore.entries.unshift(pendingEntry);
+    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+    if (cust) {
+      if (!cust.entries) cust.entries = [];
+      cust.entries.unshift({ entry_id: pendingId, due_amount: dueAmount, entry_date: now, is_pending: true });
+    }
+    return pendingId;
+  }
+
   if (await isDemoSession()) {
+    if (isSyncReplay) {
+      const pendingEntry = demoStore.entries.find(
+        (e) => e.is_pending && e.customer_id === numericId && e.total_amount === parsedTotal
+      );
+      if (pendingEntry) {
+        pendingEntry.is_pending = false;
+        const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+        if (cust && cust.entries) {
+          const custPending = cust.entries.find((e) => e.entry_id === pendingEntry.entry_id);
+          if (custPending) custPending.is_pending = false;
+        }
+        return pendingEntry.entry_id;
+      }
+    }
+
     const newEntry = {
       entry_id: demoStore.nextEntryId++,
       customer_id: numericId,
@@ -700,6 +728,7 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
           original_price: m.original_price != null ? parseFloat(m.original_price) : linePrice,
           discount_percent: parseFloat(m.discount_percent) || 0,
           quantity: qty,
+          unit: m.unit || 'tablets',
           unit_price: unitPrice,
         };
       }),
@@ -797,10 +826,132 @@ export async function addPurchaseEntry({ customerId, medicines = [], totalAmount
 }
 
 /**
+ * Updates an existing purchase entry and its itemized medicines atomically
+ */
+export async function updatePurchaseEntry({
+  entryId,
+  customerId,
+  medicines = [],
+  totalAmount = 0,
+  amountPaid = 0,
+  notes = '',
+}) {
+  await NetworkService.assertOnline();
+  const numericEntryId = parseInt(entryId, 10);
+  const numericCustomerId = parseInt(customerId, 10);
+  if (!numericEntryId) throw new Error('Valid purchase entry ID is required for update.');
+
+  const now = getCurrentLocalIso();
+  const parsedTotal = Math.max(0, parseFloat(totalAmount) || 0);
+  const parsedPaid = Math.max(0, parseFloat(amountPaid) || 0);
+  const dueAmount = calculateEntryDue(parsedTotal, parsedPaid);
+
+  if (await isDemoSession()) {
+    const entry = demoStore.entries.find((e) => e.entry_id === numericEntryId);
+    if (!entry) throw new Error('Purchase entry not found in demo session.');
+
+    entry.total_amount = parsedTotal;
+    entry.amount_paid = parsedPaid;
+    entry.due_amount = dueAmount;
+    entry.notes = (notes || '').trim();
+    entry.medicines = medicines.map((m) => {
+      const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+      const linePrice = Math.max(0, parseFloat(m.price) || 0);
+      const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : linePrice / qty;
+      return {
+        id: m.id || demoStore.nextMedId++,
+        entry_id: numericEntryId,
+        medicine_name: (m.name || m.medicine_name || '').trim(),
+        price: linePrice,
+        original_price: m.original_price != null ? parseFloat(m.original_price) : linePrice,
+        discount_percent: parseFloat(m.discount_percent) || 0,
+        quantity: qty,
+        unit: m.unit || 'tablets',
+        unit_price: unitPrice,
+      };
+    });
+
+    const cust = demoStore.customers.find((c) => c.customer_id === (numericCustomerId || entry.customer_id));
+    if (cust && cust.entries) {
+      const custEntry = cust.entries.find((e) => e.entry_id === numericEntryId);
+      if (custEntry) {
+        custEntry.due_amount = dueAmount;
+        custEntry.total_amount = parsedTotal;
+        custEntry.amount_paid = parsedPaid;
+      }
+    }
+
+    return numericEntryId;
+  }
+
+  try {
+    const userId = await getAuthUserId();
+
+    const validMeds = medicines
+      .filter((m) => (m.name || m.medicine_name || '').trim())
+      .map((m) => {
+        const name = (m.name || m.medicine_name).trim();
+        const medPrice = Math.max(0, parseFloat(m.price) || 0);
+        const origPrice = m.original_price != null ? Math.max(0, parseFloat(m.original_price)) : medPrice;
+        const discPct = m.discount_percent != null ? Math.max(0, parseFloat(m.discount_percent)) : 0;
+        const qty = Math.max(1, parseInt(m.quantity, 10) || 1);
+        const unitPrice = m.unit_price != null ? Math.max(0, parseFloat(m.unit_price)) : (medPrice / qty);
+
+        return {
+          medicine_name: name,
+          price: medPrice,
+          original_price: origPrice,
+          discount_percent: discPct,
+          quantity: qty,
+          unit_price: unitPrice,
+        };
+      });
+
+    // 1. Update parent entry
+    const { error: entryErr } = await supabase
+      .from('entries')
+      .update({
+        total_amount: parsedTotal,
+        amount_paid: parsedPaid,
+        due_amount: dueAmount,
+        notes: (notes || '').trim() || null,
+        updated_at: now,
+      })
+      .eq('entry_id', numericEntryId)
+      .eq('user_id', userId);
+
+    if (entryErr) throw entryErr;
+
+    // 2. Replace medicines: delete existing and re-insert
+    await supabase
+      .from('entry_medicines')
+      .delete()
+      .eq('entry_id', numericEntryId)
+      .eq('user_id', userId);
+
+    if (validMeds.length > 0) {
+      const medsWithKeys = validMeds.map((m) => ({
+        user_id: userId,
+        entry_id: numericEntryId,
+        ...m,
+      }));
+
+      const { error: medErr } = await supabase.from('entry_medicines').insert(medsWithKeys);
+      if (medErr) throw medErr;
+    }
+
+    return numericEntryId;
+  } catch (err) {
+    console.error('updatePurchaseEntry cloud error:', err.message);
+    throw new Error('Failed to update purchase entry in cloud: ' + err.message);
+  }
+}
+
+/**
  * Records a standalone payment towards existing dues and logs to payments table
  */
-export async function addDuePayment({ customerId, amountPaid }) {
-  await NetworkService.assertOnline();
+export async function addDuePayment({ customerId, amountPaid, isSyncReplay = false }) {
+  const isOnline = await NetworkService.checkConnection();
   const numericId = parseInt(customerId, 10);
   const now = getCurrentLocalIso();
   const parsedPaid = Math.max(0, parseFloat(amountPaid) || 0);
@@ -809,7 +960,48 @@ export async function addDuePayment({ customerId, amountPaid }) {
   }
   const dueAmount = calculatePaymentDue(parsedPaid);
 
+  if (!isOnline && !isSyncReplay) {
+    await OfflineSyncService.enqueueMutation({
+      type: 'ADD_PAYMENT',
+      payload: { customerId, amountPaid },
+    });
+    const pendingId = demoStore.nextEntryId++;
+    const pendingEntry = {
+      entry_id: pendingId,
+      customer_id: numericId,
+      entry_date: now,
+      total_amount: 0,
+      amount_paid: parsedPaid,
+      due_amount: dueAmount,
+      medicines: [],
+      deleted_at: null,
+      is_pending: true,
+    };
+    demoStore.entries.unshift(pendingEntry);
+    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+    if (cust) {
+      if (!cust.entries) cust.entries = [];
+      cust.entries.unshift({ entry_id: pendingId, due_amount: dueAmount, entry_date: now, is_pending: true });
+    }
+    return pendingId;
+  }
+
   if (await isDemoSession()) {
+    if (isSyncReplay) {
+      const pendingEntry = demoStore.entries.find(
+        (e) => e.is_pending && e.customer_id === numericId && e.amount_paid === parsedPaid && e.total_amount === 0
+      );
+      if (pendingEntry) {
+        pendingEntry.is_pending = false;
+        const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+        if (cust && cust.entries) {
+          const custPending = cust.entries.find((e) => e.entry_id === pendingEntry.entry_id);
+          if (custPending) custPending.is_pending = false;
+        }
+        return pendingEntry.entry_id;
+      }
+    }
+
     const newEntry = {
       entry_id: demoStore.nextEntryId++,
       customer_id: numericId,
@@ -1025,6 +1217,7 @@ export async function exportAllData() {
       version: '2.0',
       source: 'MedTrack Demo Sandbox',
       exportedAt: getCurrentLocalIso(),
+      exportDate: getCurrentLocalIso(),
       totalCustomers: demoStore.customers.length,
       activeCustomers: demoStore.customers.filter((c) => !c.deleted_at).length,
       deletedCustomers: demoStore.customers.filter((c) => c.deleted_at).length,
@@ -1066,6 +1259,7 @@ export async function exportAllData() {
     version: '2.0',
     source: 'MedTrack Supabase Cloud',
     exportedAt: getCurrentLocalIso(),
+    exportDate: getCurrentLocalIso(),
     totalCustomers: formattedCustomers.length,
     activeCustomers: formattedCustomers.filter((c) => !c.is_deleted).length,
     deletedCustomers: formattedCustomers.filter((c) => c.is_deleted).length,
@@ -1251,4 +1445,4 @@ export async function restoreFromBackup(backupData) {
   };
 }
 
-export * from './database_extensions';
+export * from './database_extensions.js';

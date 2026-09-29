@@ -6,12 +6,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 
-// Suppress dev warning banners from user-facing screens
+// Suppress known harmless deprecation warnings only
 LogBox.ignoreLogs([
   'SafeAreaView has been deprecated',
   'SafeAreaView',
 ]);
-LogBox.ignoreAllLogs(true);
 
 import { initDatabase } from './src/db/database';
 import { COLORS } from './src/constants/theme';

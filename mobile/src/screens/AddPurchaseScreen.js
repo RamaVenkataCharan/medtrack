@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,34 +17,56 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, TOUCH_TARGETS } from '../constants/theme';
 import {
   addPurchaseEntry,
+  updatePurchaseEntry,
   getPastMedicineNames,
   searchCustomers,
 } from '../db/database';
 import Avatar from '../components/Avatar';
 import NetworkBanner from '../components/NetworkBanner';
 
+const UNITS = ['tablets', 'strips', 'capsules', 'bottles', 'boxes', 'units'];
+
 export default function AddPurchaseScreen({ route, navigation }) {
   const initialCustomerId = route.params?.customerId || null;
   const initialCustomer = route.params?.customer || null;
+  const editEntry = route.params?.editEntry || null;
 
   const [selectedCustomer, setSelectedCustomer] = useState(
     initialCustomer || (initialCustomerId ? { customer_id: initialCustomerId, name: route.params?.customerName } : null)
   );
 
-  // Customer search picker modal state if no customer selected
-  const [customerPickerVisible, setCustomerPickerVisible] = useState(!initialCustomerId);
+  // Customer search picker modal
+  const [customerPickerVisible, setCustomerPickerVisible] = useState(!initialCustomerId && !initialCustomer);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerSearchResults, setCustomerSearchResults] = useState([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
 
-  // Medicine list: array of { id, name, quantity, unit_price }
-  const [medicines, setMedicines] = useState([
-    { id: '1', name: '', quantity: 1, unit_price: '' },
-  ]);
+  // Medicine list: array of { id, name, quantity, unit, unit_price }
+  const [medicines, setMedicines] = useState(
+    editEntry?.medicines?.length
+      ? editEntry.medicines.map((m, idx) => ({
+          id: String(m.id || idx),
+          name: m.medicine_name || m.name || '',
+          quantity: m.quantity || 1,
+          unit: m.unit || 'tablets',
+          unit_price: m.unit_price || m.price ? String(m.unit_price || m.price) : '',
+        }))
+      : [{ id: '1', name: '', quantity: 10, unit: 'tablets', unit_price: '' }]
+  );
+
   const [pastSuggestions, setPastSuggestions] = useState([]);
-  const [notes, setNotes] = useState('');
-  const [amountPaid, setAmountPaid] = useState('');
+  const [notes, setNotes] = useState(editEntry?.notes || '');
+  const [amountPaid, setAmountPaid] = useState(editEntry?.amount_paid ? String(editEntry.amount_paid) : '');
   const [saving, setSaving] = useState(false);
+  const [activeUnitPickerIdx, setActiveUnitPickerIdx] = useState(null);
+  const savingRef = useRef(false);
+
+  // Format today's date: "Today · 29 Sep 2026"
+  const todayFormatted = `Today · ${new Date().toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })}`;
 
   useEffect(() => {
     getPastMedicineNames()
@@ -77,13 +99,19 @@ export default function AddPurchaseScreen({ route, navigation }) {
   const addMedicineRow = () => {
     setMedicines((prev) => [
       ...prev,
-      { id: String(Date.now() + Math.random()), name: '', quantity: 1, unit_price: '' },
+      {
+        id: String(Date.now() + Math.random()),
+        name: '',
+        quantity: 1,
+        unit: 'tablets',
+        unit_price: '',
+      },
     ]);
   };
 
   const removeMedicineRow = (id) => {
     if (medicines.length === 1) {
-      setMedicines([{ id: '1', name: '', quantity: 1, unit_price: '' }]);
+      setMedicines([{ id: '1', name: '', quantity: 1, unit: 'tablets', unit_price: '' }]);
       return;
     }
     setMedicines((prev) => prev.filter((m) => m.id !== id));
@@ -111,16 +139,8 @@ export default function AddPurchaseScreen({ route, navigation }) {
     );
   };
 
-  const selectSuggestion = (name) => {
-    const emptyRow = medicines.find((m) => !m.name.trim());
-    if (emptyRow) {
-      updateMedicine(emptyRow.id, 'name', name);
-    } else {
-      setMedicines([
-        ...medicines,
-        { id: String(Date.now() + Math.random()), name, quantity: 1, unit_price: '' },
-      ]);
-    }
+  const selectSuggestion = (targetId, name) => {
+    updateMedicine(targetId, 'name', name);
   };
 
   // Calculations
@@ -130,13 +150,12 @@ export default function AddPurchaseScreen({ route, navigation }) {
     return sum + qty * price;
   }, 0);
 
-  // If amountPaid is empty, default to full payment (calculatedTotal); if explicitly 0, keep 0
-  const parsedPaid = amountPaid.trim() === ''
-    ? calculatedTotal
-    : Math.max(0, parseFloat(amountPaid) || 0);
-  const calculatedDue = Math.max(0, calculatedTotal - parsedPaid);
+  const parsedPaid = amountPaid.trim() === '' ? calculatedTotal : Math.max(0, parseFloat(amountPaid) || 0);
+  const dueAmountCalculated = Math.max(0, calculatedTotal - parsedPaid);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+
     if (!selectedCustomer) {
       setCustomerPickerVisible(true);
       return;
@@ -150,62 +169,58 @@ export default function AddPurchaseScreen({ route, navigation }) {
         return {
           name: m.name.trim(),
           quantity: qty,
+          unit: m.unit || 'units',
           unit_price: uPrice,
           price: qty * uPrice,
-          original_price: qty * uPrice,
-          discount_percent: 0,
         };
       });
 
     if (validMeds.length === 0 && calculatedTotal === 0) {
-      const msg = 'Please enter at least one medicine or purchase amount.';
+      const msg = 'Please enter at least one medicine.';
       Platform.OS === 'web' ? alert(msg) : Alert.alert('Empty Purchase', msg);
       return;
     }
 
-    for (const m of validMeds) {
-      if (m.quantity < 1) {
-        const msg = `Quantity for "${m.name}" must be at least 1.`;
-        Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Quantity', msg);
-        return;
-      }
-      if (m.unit_price < 0) {
-        const msg = `Rate for "${m.name}" cannot be negative.`;
-        Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Rate', msg);
-        return;
-      }
-    }
+    const finalTotal = calculatedTotal;
+    const finalPaid = amountPaid.trim() === '' ? finalTotal : Math.max(0, parseFloat(amountPaid) || 0);
 
-    if (parsedPaid < 0) {
-      const msg = 'Amount paid cannot be negative.';
-      Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid Payment', msg);
-      return;
-    }
-
+    savingRef.current = true;
     setSaving(true);
     try {
-      const newEntryId = await addPurchaseEntry({
-        customerId: selectedCustomer.customer_id,
-        medicines: validMeds,
-        totalAmount: calculatedTotal,
-        amountPaid: parsedPaid,
-        notes: notes.trim(),
-      });
+      if (editEntry?.entry_id) {
+        await updatePurchaseEntry({
+          entryId: editEntry.entry_id,
+          customerId: selectedCustomer.customer_id,
+          medicines: validMeds,
+          totalAmount: finalTotal,
+          amountPaid: finalPaid,
+          notes: notes.trim(),
+        });
+      } else {
+        await addPurchaseEntry({
+          customerId: selectedCustomer.customer_id,
+          medicines: validMeds,
+          totalAmount: finalTotal,
+          amountPaid: finalPaid,
+          notes: notes.trim(),
+        });
+      }
 
-      // Navigate to Screen 9: Purchase Saved Successfully!
-      navigation.replace('PurchaseSuccess', {
-        entryId: newEntryId,
-        customerName: selectedCustomer.name,
-        medicineCount: validMeds.length,
-        totalAmount: calculatedTotal,
-        entryDate: new Date().toISOString(),
-      });
+      // Navigate to confirmation or back
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('CustomerProfile', {
+          customerId: selectedCustomer.customer_id,
+          customer: selectedCustomer,
+        });
+      }
     } catch (err) {
       console.warn('Error saving purchase:', err);
-      const errMsg = err.message || 'Could not save purchase entry. Please check your connection and try again.';
+      const errMsg = err.message || 'Could not save purchase entry.';
       Platform.OS === 'web' ? alert(`Save Failed: ${errMsg}`) : Alert.alert('Save Failed', errMsg);
-      // Notice: Form state is completely preserved so user does not lose entered data!
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -217,9 +232,10 @@ export default function AddPurchaseScreen({ route, navigation }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        {/* Top Header */}
+        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
+            testID="purchase-back-btn"
             style={styles.backButton}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
@@ -227,210 +243,286 @@ export default function AddPurchaseScreen({ route, navigation }) {
           >
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Record Purchase</Text>
+          <Text style={styles.headerTitle}>{editEntry ? 'Edit purchase' : 'Record purchase'}</Text>
           <View style={{ width: 44 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {/* Selected Customer Bar (Screen 8 in roadmap) */}
-          <View style={styles.customerBar}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Customer Selection Card */}
+          <TouchableOpacity
+            style={styles.customerCard}
+            onPress={() => setCustomerPickerVisible(true)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={selectedCustomer ? `Customer: ${selectedCustomer.name}` : 'Select Customer'}
+          >
             {selectedCustomer ? (
               <>
-                <Avatar name={selectedCustomer.name} size={44} />
+                <Avatar name={selectedCustomer.name} size={44} showBorder />
                 <View style={styles.customerMeta}>
-                  <Text style={styles.customerName}>{selectedCustomer.name}</Text>
+                  <Text style={styles.customerName} numberOfLines={1}>
+                    {selectedCustomer.name}
+                  </Text>
                   <Text style={styles.customerPhone}>
                     {selectedCustomer.phone_number || 'No phone'}
                   </Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.changeCustomerBtn}
-                  onPress={() => setCustomerPickerVisible(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change customer"
-                >
-                  <Text style={styles.changeCustomerText}>Change</Text>
-                </TouchableOpacity>
+                <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
               </>
             ) : (
-              <TouchableOpacity
-                style={styles.selectCustomerPrompt}
-                onPress={() => setCustomerPickerVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Select customer for this purchase"
-              >
-                <Ionicons name="person-add" size={20} color={COLORS.primary} style={{ marginRight: 8 }} />
-                <Text style={styles.selectCustomerPromptText}>Select Customer *</Text>
-              </TouchableOpacity>
+              <View style={styles.noCustomerRow}>
+                <Ionicons name="person-add-outline" size={22} color={COLORS.primary} style={{ marginRight: 10 }} />
+                <Text style={styles.selectCustomerPrompt}>Select a customer...</Text>
+                <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+              </View>
             )}
+          </TouchableOpacity>
+
+          {/* Date Selector Row */}
+          <View style={styles.dateSelectorCard}>
+            <View style={styles.dateLeft}>
+              <Ionicons name="calendar-outline" size={20} color={COLORS.primary} style={{ marginRight: 12 }} />
+              <View>
+                <Text style={styles.dateLabel}>Date</Text>
+                <Text style={styles.dateValue}>{todayFormatted}</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </View>
 
-          {/* Quick Suggestions Chips */}
-          {pastSuggestions.length > 0 && (
-            <View style={styles.suggestionsContainer}>
-              <Text style={styles.suggestionsTitle}>Quick add frequent medicine:</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-                {pastSuggestions.slice(0, 10).map((name, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.suggestionChip}
-                    onPress={() => selectSuggestion(name)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="add" size={14} color={COLORS.primary} style={{ marginRight: 2 }} />
-                    <Text style={styles.suggestionChipText}>{name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-
-          {/* Medicine List Section */}
+          {/* Medicines Section */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Medicines</Text>
           </View>
 
-          {medicines.map((item, index) => {
-            const qty = item.quantity || 1;
-            const unitPrice = parseFloat(item.unit_price) || 0;
-            const rowTotal = qty * unitPrice;
+          {medicines.map((med, index) => {
+            // Filter suggestions matching the typed text
+            const suggestions = pastSuggestions.filter(
+              (s) =>
+                med.name.trim().length > 1 &&
+                s.toLowerCase().includes(med.name.toLowerCase().trim()) &&
+                s.toLowerCase() !== med.name.toLowerCase().trim()
+            ).slice(0, 3);
 
             return (
-              <View key={item.id} style={styles.medicineCard}>
-                <View style={styles.cardTopRow}>
-                  <View style={styles.medIndexWrap}>
-                    <Text style={styles.medIndexText}>{index + 1}</Text>
+              <View key={med.id} style={styles.medicineCard}>
+                {/* Medicine Name Field */}
+                <Text style={styles.inputLabel}>Medicine name</Text>
+                <TextInput
+                  style={styles.medicineNameInput}
+                  value={med.name}
+                  onChangeText={(val) => updateMedicine(med.id, 'name', val)}
+                  placeholder="e.g. Paracetamol 500 mg"
+                  placeholderTextColor={COLORS.textMuted}
+                />
+
+                {/* Autocomplete suggestions chips */}
+                {suggestions.length > 0 && (
+                  <View style={styles.suggestionsRow}>
+                    {suggestions.map((sug) => (
+                      <TouchableOpacity
+                        key={sug}
+                        style={styles.suggestionChip}
+                        onPress={() => selectSuggestion(med.id, sug)}
+                      >
+                        <Text style={styles.suggestionChipText}>{sug}</Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                  <TextInput
-                    style={styles.medNameInput}
-                    value={item.name}
-                    onChangeText={(val) => updateMedicine(item.id, 'name', val)}
-                    placeholder="Medicine name (e.g. Paracetamol 500mg)"
-                    placeholderTextColor={COLORS.textMuted}
-                    accessibilityLabel={`Medicine ${index + 1} Name`}
-                  />
-                  {medicines.length > 1 && (
-                    <TouchableOpacity
-                      onPress={() => removeMedicineRow(item.id)}
-                      style={styles.removeRowBtn}
-                      accessibilityLabel="Remove medicine"
-                    >
-                      <Ionicons name="trash-outline" size={18} color={COLORS.error} />
-                    </TouchableOpacity>
-                  )}
+                )}
+
+                {/* Quantity & Unit Stepper Row */}
+                <View style={styles.qtyPriceRow}>
+                  <View style={styles.qtyCol}>
+                    <Text style={styles.inputLabel}>Quantity</Text>
+                    <View style={styles.stepperContainer}>
+                      <TouchableOpacity
+                        style={styles.stepBtn}
+                        onPress={() => decrementQty(med.id)}
+                        accessibilityLabel="Decrease quantity"
+                      >
+                        <Ionicons name="remove" size={18} color={COLORS.text} />
+                      </TouchableOpacity>
+
+                      <Text style={styles.qtyValue}>{med.quantity}</Text>
+
+                      <TouchableOpacity
+                        style={styles.stepBtn}
+                        onPress={() => incrementQty(med.id)}
+                        accessibilityLabel="Increase quantity"
+                      >
+                        <Ionicons name="add" size={18} color={COLORS.text} />
+                      </TouchableOpacity>
+
+                      {/* Unit dropdown toggle */}
+                      <TouchableOpacity
+                        style={styles.unitDropdownBtn}
+                        onPress={() => setActiveUnitPickerIdx(index)}
+                      >
+                        <Text style={styles.unitDropdownText}>{med.unit}</Text>
+                        <Ionicons name="chevron-down" size={14} color={COLORS.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Delete Item Button */}
+                  <TouchableOpacity
+                    style={styles.deleteMedBtn}
+                    onPress={() => removeMedicineRow(med.id)}
+                    accessibilityLabel="Remove medicine"
+                  >
+                    <Ionicons name="trash-outline" size={20} color={COLORS.primary} />
+                  </TouchableOpacity>
                 </View>
 
-                {/* Stepper + Rate Row */}
-                <View style={styles.cardBottomRow}>
-                  {/* Stepper Control */}
-                  <View style={styles.stepperControl}>
-                    <TouchableOpacity
-                      style={styles.stepperBtn}
-                      onPress={() => decrementQty(item.id)}
-                      accessibilityLabel="Decrease quantity"
-                    >
-                      <Ionicons name="remove" size={18} color={COLORS.text} />
-                    </TouchableOpacity>
-                    <Text style={styles.stepperValue}>{qty}</Text>
-                    <TouchableOpacity
-                      style={styles.stepperBtn}
-                      onPress={() => incrementQty(item.id)}
-                      accessibilityLabel="Increase quantity"
-                    >
-                      <Ionicons name="add" size={18} color={COLORS.text} />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Unit Price Input */}
-                  <View style={styles.rateInputWrap}>
-                    <Text style={styles.rateSymbol}>₹</Text>
-                    <TextInput
-                      style={styles.rateInput}
-                      value={String(item.unit_price || '')}
-                      onChangeText={(val) => updateMedicine(item.id, 'unit_price', val)}
-                      placeholder="Rate"
-                      placeholderTextColor={COLORS.textMuted}
-                      keyboardType="numeric"
-                      accessibilityLabel="Rate per unit"
-                    />
-                  </View>
-
-                  {/* Calculated Line Total */}
-                  <View style={styles.lineTotalWrap}>
-                    <Text style={styles.lineTotalLabel}>Line Total</Text>
-                    <Text style={styles.lineTotalAmount}>₹{rowTotal.toFixed(0)}</Text>
-                  </View>
+                {/* Optional Unit Price Row */}
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceRowLabel}>Rate (₹ optional):</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={med.unit_price}
+                    onChangeText={(val) => updateMedicine(med.id, 'unit_price', val)}
+                    placeholder="₹0"
+                    keyboardType="numeric"
+                    placeholderTextColor={COLORS.textMuted}
+                  />
+                  {parseFloat(med.unit_price) > 0 && (
+                    <Text style={styles.lineTotalText}>
+                      Total: ₹{(med.quantity * parseFloat(med.unit_price)).toFixed(0)}
+                    </Text>
+                  )}
                 </View>
               </View>
             );
           })}
 
-          {/* + Add Medicine Button */}
+          {/* Add Another Medicine Button */}
           <TouchableOpacity
-            style={styles.addMedicineBtn}
+            style={styles.addMedBtn}
             onPress={addMedicineRow}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
             accessibilityRole="button"
-            accessibilityLabel="Add Medicine"
+            accessibilityLabel="Add another medicine"
           >
-            <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} style={{ marginRight: 6 }} />
-            <Text style={styles.addMedicineBtnText}>+ Add Medicine</Text>
+            <Ionicons name="add" size={20} color={COLORS.primary} style={{ marginRight: 6 }} />
+            <Text style={styles.addMedBtnText}>Add another medicine</Text>
           </TouchableOpacity>
 
-          {/* Optional Notes */}
-          <View style={styles.notesGroup}>
-            <Text style={styles.notesLabel}>Notes (Optional)</Text>
+          {/* Optional Note Section */}
+          <View style={styles.noteSection}>
+            <Text style={styles.sectionTitle}>Note (optional)</Text>
             <TextInput
-              style={styles.notesInput}
+              style={styles.noteInput}
               value={notes}
               onChangeText={setNotes}
-              placeholder="e.g. Regular monthly medicines, morning/night dosage"
+              placeholder="Add a note..."
               placeholderTextColor={COLORS.textMuted}
               multiline
-              numberOfLines={2}
             />
           </View>
 
-          {/* Summary / Total Card */}
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryTotalLabel}>Total Amount</Text>
-              <Text style={styles.summaryTotalValue}>₹{calculatedTotal.toFixed(0)}</Text>
-            </View>
-
-            <View style={styles.paidInputRow}>
-              <Text style={styles.paidLabel}>Amount Paid (₹)</Text>
-              <TextInput
-                style={styles.paidInput}
-                value={amountPaid}
-                onChangeText={setAmountPaid}
-                placeholder={calculatedTotal > 0 ? String(calculatedTotal.toFixed(0)) : '0'}
-                placeholderTextColor={COLORS.textMuted}
-                keyboardType="numeric"
-              />
-            </View>
-
-            {calculatedDue > 0 && (
-              <View style={styles.dueRow}>
-                <Ionicons name="alert-circle" size={16} color={COLORS.error} />
-                <Text style={styles.dueText}>Remaining Due: ₹{calculatedDue.toFixed(0)}</Text>
+          {/* Total & Payment Summary Card */}
+          {calculatedTotal > 0 && (
+            <View style={styles.totalSummaryCard}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.totalSummaryLabel}>Total Bill</Text>
+                <Text style={styles.totalSummaryValue}>₹{calculatedTotal.toFixed(0)}</Text>
               </View>
-            )}
-          </View>
 
-          {/* Save Purchase Primary Button */}
+              {/* Amount Paid Row */}
+              <View style={styles.paidInputRow}>
+                <Text style={styles.paidLabel}>Amount Paid</Text>
+                <View style={styles.paidInputWrap}>
+                  <Text style={styles.rupeePrefix}>₹</Text>
+                  <TextInput
+                    testID="purchase-paid-input"
+                    style={styles.paidInput}
+                    placeholder={calculatedTotal > 0 ? String(calculatedTotal.toFixed(0)) : '0'}
+                    placeholderTextColor={COLORS.textMuted}
+                    value={amountPaid}
+                    onChangeText={setAmountPaid}
+                    keyboardType="numeric"
+                    accessibilityLabel="Amount Paid"
+                  />
+                </View>
+              </View>
+
+              {/* Quick Presets */}
+              <View style={styles.paymentPresetRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentPresetPill,
+                    (amountPaid === '' || parseFloat(amountPaid) === calculatedTotal) && styles.paymentPresetPillActive,
+                  ]}
+                  onPress={() => setAmountPaid(calculatedTotal > 0 ? String(calculatedTotal.toFixed(0)) : '')}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Paid in full"
+                >
+                  <Text
+                    style={[
+                      styles.paymentPresetPillText,
+                      (amountPaid === '' || parseFloat(amountPaid) === calculatedTotal) && styles.paymentPresetPillTextActive,
+                    ]}
+                  >
+                    Paid in full
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.paymentPresetPill,
+                    amountPaid === '0' && styles.paymentPresetPillActive,
+                  ]}
+                  onPress={() => setAmountPaid('0')}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Credit / Udhar (Zero paid)"
+                >
+                  <Text
+                    style={[
+                      styles.paymentPresetPillText,
+                      amountPaid === '0' && styles.paymentPresetPillTextActive,
+                    ]}
+                  >
+                    Credit / Udhar (₹0)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Due Summary */}
+              <View style={styles.dueSummaryRow}>
+                <Text style={styles.dueSummaryLabel}>Balance Due</Text>
+                <Text
+                  style={[
+                    styles.dueSummaryValue,
+                    dueAmountCalculated > 0 ? styles.dueSummaryValueOwed : styles.dueSummaryValueSettled,
+                  ]}
+                >
+                  {dueAmountCalculated > 0 ? `₹${dueAmountCalculated.toFixed(0)} (Due)` : '₹0 (Settled)'}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Save Purchase Button */}
           <TouchableOpacity
-            style={styles.saveBtn}
+            testID="purchase-save-btn"
+            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
             onPress={handleSave}
             disabled={saving}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel="Save Purchase"
+            accessibilityLabel="Save purchase"
           >
             {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Text style={styles.saveBtnText}>Save Purchase</Text>
+              <Text style={styles.saveBtnText}>{editEntry ? 'Save changes' : 'Save purchase'}</Text>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -440,21 +532,21 @@ export default function AddPurchaseScreen({ route, navigation }) {
       <Modal
         visible={customerPickerVisible}
         animationType="slide"
+        transparent={false}
         onRequestClose={() => {
           if (selectedCustomer) setCustomerPickerVisible(false);
-          else navigation.goBack();
         }}
       >
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.pickerSafeArea}>
           <View style={styles.pickerHeader}>
             <TouchableOpacity
+              style={styles.backButton}
               onPress={() => {
                 if (selectedCustomer) setCustomerPickerVisible(false);
                 else navigation.goBack();
               }}
-              style={styles.backButton}
             >
-              <Ionicons name="close" size={24} color={COLORS.text} />
+              <Ionicons name="arrow-back" size={24} color={COLORS.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Select Customer</Text>
             <TouchableOpacity
@@ -462,26 +554,25 @@ export default function AddPurchaseScreen({ route, navigation }) {
                 setCustomerPickerVisible(false);
                 navigation.navigate('AddCustomer');
               }}
-              style={styles.pickerAddBtn}
             >
-              <Ionicons name="person-add" size={22} color={COLORS.primary} />
+              <Ionicons name="person-add-outline" size={22} color={COLORS.primary} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.pickerSearchWrap}>
-            <Ionicons name="search" size={20} color={COLORS.textMuted} style={{ marginRight: 8 }} />
+          <View style={styles.pickerSearchContainer}>
+            <Ionicons name="search" size={18} color={COLORS.textMuted} style={{ marginRight: 8 }} />
             <TextInput
               style={styles.pickerSearchInput}
-              placeholder="Search customer by name or phone..."
-              placeholderTextColor={COLORS.textMuted}
               value={customerSearchQuery}
               onChangeText={setCustomerSearchQuery}
+              placeholder="Search by customer name or phone"
+              placeholderTextColor={COLORS.textMuted}
               autoFocus
             />
           </View>
 
           {searchingCustomers ? (
-            <View style={styles.centerContainer}>
+            <View style={styles.pickerCenter}>
               <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
@@ -494,10 +585,9 @@ export default function AddPurchaseScreen({ route, navigation }) {
                     setSelectedCustomer(c);
                     setCustomerPickerVisible(false);
                   }}
-                  activeOpacity={0.7}
                 >
-                  <Avatar name={c.name} size={42} />
-                  <View style={styles.pickerItemMeta}>
+                  <Avatar name={c.name} size={42} showBorder />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
                     <Text style={styles.pickerItemName}>{c.name}</Text>
                     <Text style={styles.pickerItemPhone}>{c.phone_number || 'No phone'}</Text>
                   </View>
@@ -507,6 +597,38 @@ export default function AddPurchaseScreen({ route, navigation }) {
             </ScrollView>
           )}
         </SafeAreaView>
+      </Modal>
+
+      {/* Unit Selector Modal */}
+      <Modal
+        visible={activeUnitPickerIdx !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveUnitPickerIdx(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setActiveUnitPickerIdx(null)}
+        >
+          <View style={styles.unitPickerCard}>
+            <Text style={styles.unitPickerHeader}>Select Unit</Text>
+            {UNITS.map((unit) => (
+              <TouchableOpacity
+                key={unit}
+                style={styles.unitPickerOption}
+                onPress={() => {
+                  if (activeUnitPickerIdx !== null && medicines[activeUnitPickerIdx]) {
+                    updateMedicine(medicines[activeUnitPickerIdx].id, 'unit', unit);
+                  }
+                  setActiveUnitPickerIdx(null);
+                }}
+              >
+                <Text style={styles.unitPickerOptionText}>{unit}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -522,283 +644,280 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
-    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
-    paddingBottom: SPACING.sm,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
+    paddingBottom: 12,
   },
   backButton: {
     width: TOUCH_TARGETS.minWidth,
     height: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
     alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   headerTitle: {
     ...TYPOGRAPHY.h2,
     fontSize: 20,
-    color: COLORS.text,
     fontWeight: '700',
+    color: COLORS.text,
   },
   scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: 40,
   },
-  customerBar: {
+  customerCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
+    padding: 14,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
+    marginBottom: 12,
   },
   customerMeta: {
     flex: 1,
-    marginLeft: SPACING.md,
+    marginLeft: 12,
   },
   customerName: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  customerPhone: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  changeCustomerBtn: {
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.primaryLight,
-  },
-  changeCustomerText: {
-    ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  selectCustomerPrompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    paddingVertical: SPACING.sm,
-  },
-  selectCustomerPromptText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 16,
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  suggestionsContainer: {
-    marginBottom: SPACING.md,
-  },
-  suggestionsTitle: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 6,
-  },
-  chipsRow: {
-    flexDirection: 'row',
-    paddingVertical: 2,
-  },
-  suggestionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.full,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginRight: 8,
-  },
-  suggestionChipText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.text,
-  },
-  sectionHeader: {
-    marginBottom: SPACING.xs,
-  },
-  sectionTitle: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  medicineCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  medIndexWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: COLORS.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.xs,
-  },
-  medIndexText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  medNameInput: {
-    flex: 1,
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    color: COLORS.text,
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  removeRowBtn: {
-    padding: SPACING.xs,
-    marginLeft: SPACING.xs,
-  },
-  cardBottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: SPACING.xs,
-  },
-  stepperControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.background,
-  },
-  stepperBtn: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stepperValue: {
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-    paddingHorizontal: 8,
-  },
-  rateInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.sm,
-    paddingHorizontal: SPACING.sm,
-    backgroundColor: COLORS.background,
-    height: 36,
-    width: 90,
-  },
-  rateSymbol: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 14,
-    color: COLORS.textMuted,
-    marginRight: 4,
-  },
-  rateInput: {
-    flex: 1,
-    ...TYPOGRAPHY.body,
-    fontSize: 14,
-    color: COLORS.text,
-    paddingVertical: 2,
-  },
-  lineTotalWrap: {
-    alignItems: 'flex-end',
-  },
-  lineTotalLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  lineTotalAmount: {
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  addMedicineBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderStyle: 'dashed',
-    borderRadius: RADIUS.md,
-    paddingVertical: SPACING.md,
-    minHeight: TOUCH_TARGETS.minHeight,
-    backgroundColor: COLORS.surface,
-    marginBottom: SPACING.md,
-  },
-  addMedicineBtnText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  notesGroup: {
-    marginBottom: SPACING.md,
-  },
-  notesLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  notesInput: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    color: COLORS.text,
-    minHeight: 56,
-  },
-  summaryCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.lg,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  summaryTotalLabel: {
     ...TYPOGRAPHY.h3,
     fontSize: 17,
     fontWeight: '700',
     color: COLORS.text,
   },
-  summaryTotalValue: {
+  customerPhone: {
+    ...TYPOGRAPHY.bodySmall,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  noCustomerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  selectCustomerPrompt: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.primary,
+    fontWeight: '600',
+    flex: 1,
+  },
+  dateSelectorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.surface,
+    padding: 14,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20,
+  },
+  dateLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dateLabel: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  dateValue: {
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: 1,
+  },
+  sectionHeader: {
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  medicineCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 12,
+  },
+  inputLabel: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 6,
+  },
+  medicineNameInput: {
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    height: 48,
+    fontSize: 16,
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  suggestionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  suggestionChip: {
+    backgroundColor: COLORS.surfaceSubtle,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
+  },
+  suggestionChipText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  qtyPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  qtyCol: {
+    flex: 1,
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stepBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyValue: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    minWidth: 36,
+    textAlign: 'center',
+    marginHorizontal: 4,
+  },
+  unitDropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 10,
+    height: 38,
+    marginLeft: 8,
+    backgroundColor: COLORS.background,
+  },
+  unitDropdownText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: COLORS.text,
+    marginRight: 4,
+  },
+  deleteMedBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderSubtle,
+  },
+  priceRowLabel: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textSecondary,
+    marginRight: 6,
+  },
+  priceInput: {
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 8,
+    height: 34,
+    width: 80,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  lineTotalText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: COLORS.primary,
+    fontWeight: '700',
+    marginLeft: 'auto',
+  },
+  addMedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
+    borderRadius: RADIUS.pill,
+    height: 48,
+    marginBottom: 20,
+  },
+  addMedBtnText: {
+    ...TYPOGRAPHY.button,
+    color: COLORS.primary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  noteSection: {
+    marginBottom: 20,
+  },
+  noteInput: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: COLORS.text,
+    minHeight: 70,
+    textAlignVertical: 'top',
+    marginTop: 8,
+  },
+  totalSummaryCard: {
+    backgroundColor: COLORS.surface,
+    padding: 16,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  totalSummaryLabel: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  totalSummaryValue: {
     ...TYPOGRAPHY.h2,
     fontSize: 22,
     fontWeight: '800',
@@ -808,122 +927,210 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: SPACING.xs,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderSubtle,
+    marginBottom: 10,
   },
   paidLabel: {
     ...TYPOGRAPHY.body,
     fontSize: 14,
     color: COLORS.textSecondary,
+    fontWeight: '600',
   },
-  paidInput: {
+  paidInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: RADIUS.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 4,
-    minWidth: 100,
-    textAlign: 'right',
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
-    color: COLORS.text,
+    paddingHorizontal: 8,
+    height: 38,
+    minWidth: 110,
   },
-  dueRow: {
+  rupeePrefix: {
+    ...TYPOGRAPHY.body,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginRight: 4,
+    fontWeight: '600',
+  },
+  paidInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'right',
+    paddingVertical: 0,
+  },
+  paymentPresetRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: SPACING.xs,
+    gap: 8,
+    marginBottom: 10,
   },
-  dueText: {
+  paymentPresetPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  paymentPresetPillActive: {
+    backgroundColor: COLORS.primaryLight,
+    borderColor: COLORS.primary,
+  },
+  paymentPresetPillText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  paymentPresetPillTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  dueSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderSubtle,
+  },
+  dueSummaryLabel: {
     ...TYPOGRAPHY.caption,
     fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  dueSummaryValue: {
+    ...TYPOGRAPHY.label,
+    fontSize: 14,
     fontWeight: '700',
-    color: COLORS.error,
-    marginLeft: 4,
+  },
+  dueSummaryValueOwed: {
+    color: '#D97706',
+  },
+  dueSummaryValueSettled: {
+    color: '#059669',
   },
   saveBtn: {
-    minHeight: TOUCH_TARGETS.minHeight,
     backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.md,
-    justifyContent: 'center',
+    height: 52,
+    borderRadius: RADIUS.lg,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  saveBtnDisabled: {
+    opacity: 0.6,
   },
   saveBtnText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 17,
-    fontWeight: '700',
+    ...TYPOGRAPHY.button,
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  pickerSafeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
   },
   pickerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    paddingVertical: 12,
   },
-  pickerAddBtn: {
-    width: TOUCH_TARGETS.minWidth,
-    height: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-  },
-  pickerSearchWrap: {
+  pickerSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    marginHorizontal: SPACING.lg,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    height: 48,
+    marginBottom: 12,
   },
   pickerSearchInput: {
     flex: 1,
-    ...TYPOGRAPHY.body,
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.text,
   },
   pickerList: {
-    padding: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: 24,
   },
   pickerItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
     backgroundColor: COLORS.surface,
+    padding: 12,
     borderRadius: RADIUS.md,
-    marginBottom: SPACING.xs,
     borderWidth: 1,
     borderColor: COLORS.border,
-  },
-  pickerItemMeta: {
-    flex: 1,
-    marginLeft: SPACING.md,
+    marginBottom: 8,
   },
   pickerItemName: {
-    ...TYPOGRAPHY.label,
+    ...TYPOGRAPHY.h3,
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
   },
   pickerItemPhone: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
+    ...TYPOGRAPHY.bodySmall,
     color: COLORS.textSecondary,
+    marginTop: 2,
   },
-  centerContainer: {
+  pickerCenter: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  unitPickerCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    width: '75%',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  unitPickerHeader: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 12,
+  },
+  unitPickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderSubtle,
+  },
+  unitPickerOptionText: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.text,
+    fontSize: 15,
+    textTransform: 'capitalize',
   },
 });

@@ -28,7 +28,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build": "expo export --platform android --no-bytecode",
-    "test": "node --test test/**/*.test.js"
+    "test": "node --import ./test/register-loader.js --test test/**/*.test.js"
   },
   "private": true
 }

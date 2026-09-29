@@ -30,6 +30,7 @@ import { formatDate } from '../utils/dateUtils';
 
 export default function HomeScreen({ navigation }) {
   const [shopName, setShopName] = useState('Sri Sai Medicals');
+  const [userName, setUserName] = useState('');
   const [summary, setSummary] = useState({
     todayPurchases: 0,
     todayCustomers: 0,
@@ -43,11 +44,10 @@ export default function HomeScreen({ navigation }) {
   const [deletedCount, setDeletedCount] = useState(0);
   const [userEmail, setUserEmail] = useState('');
 
-  const todayStr = (() => {
-    const now = new Date();
-    const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
-    return now.toLocaleDateString('en-IN', options);
-  })();
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -67,6 +67,9 @@ export default function HomeScreen({ navigation }) {
       setDeletedCount(delCount || 0);
       if (user) {
         setUserEmail(user.email || user.phone || '');
+        // Extract first name from email or use a default
+        const name = user.user_metadata?.full_name || user.email?.split('@')[0] || '';
+        setUserName(name.charAt(0).toUpperCase() + name.slice(1));
       }
     } catch (e) {
       console.warn('Dashboard load error:', e);
@@ -118,32 +121,31 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <NetworkBanner />
 
-      {/* Top Header */}
+      {/* Top Header — Greeting & Avatar */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.greetingText}>Good Morning,</Text>
-          <Text style={styles.shopNameText} numberOfLines={1}>
+          <Text style={styles.greetingText} maxFontSizeMultiplier={1.3}>
+            {getGreeting()}, {userName || 'there'}
+          </Text>
+          <Text style={styles.shopNameText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
             {shopName}
           </Text>
-          <Text style={styles.dateText}>{todayStr}</Text>
         </View>
 
-        <View style={styles.headerRight}>
-          {/* Avatar button opening minimal dropdown */}
-          <TouchableOpacity
-            style={[
-              styles.avatarBtn,
-              isProfileMenuOpen && styles.avatarBtnActive,
-            ]}
-            onPress={() => setIsProfileMenuOpen((prev) => !prev)}
-            accessibilityRole="button"
-            accessibilityLabel="User profile menu"
-            accessibilityExpanded={isProfileMenuOpen}
-            activeOpacity={0.7}
-          >
-            <Avatar name={shopName} size={42} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          testID="home-header-avatar-btn"
+          style={[
+            styles.avatarBtn,
+            isProfileMenuOpen && styles.avatarBtnActive,
+          ]}
+          onPress={() => setIsProfileMenuOpen((prev) => !prev)}
+          accessibilityRole="button"
+          accessibilityLabel="User profile menu"
+          accessibilityExpanded={isProfileMenuOpen}
+          activeOpacity={0.7}
+        >
+          <Avatar name={userName || shopName} size={40} showBorder />
+        </TouchableOpacity>
       </View>
 
       {/* Floating Profile Dropdown Menu */}
@@ -154,6 +156,7 @@ export default function HomeScreen({ navigation }) {
           </TouchableWithoutFeedback>
           <View style={styles.dropdownMenu}>
             <TouchableOpacity
+              testID="home-menu-profile"
               style={styles.dropdownItem}
               onPress={() => {
                 setIsProfileMenuOpen(false);
@@ -163,10 +166,11 @@ export default function HomeScreen({ navigation }) {
               accessibilityLabel="My Profile"
             >
               <Ionicons name="person-outline" size={18} color={COLORS.text} style={styles.dropdownIcon} />
-              <Text style={styles.dropdownItemText}>My Profile</Text>
+              <Text style={styles.dropdownItemText} maxFontSizeMultiplier={1.3}>My Profile</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
+              testID="home-menu-settings"
               style={styles.dropdownItem}
               onPress={() => {
                 setIsProfileMenuOpen(false);
@@ -176,19 +180,20 @@ export default function HomeScreen({ navigation }) {
               accessibilityLabel="Account Settings"
             >
               <Ionicons name="settings-outline" size={18} color={COLORS.text} style={styles.dropdownIcon} />
-              <Text style={styles.dropdownItemText}>Account Settings</Text>
+              <Text style={styles.dropdownItemText} maxFontSizeMultiplier={1.3}>Account Settings</Text>
             </TouchableOpacity>
 
             <View style={styles.dropdownDivider} />
 
             <TouchableOpacity
+              testID="home-menu-logout"
               style={styles.dropdownItem}
               onPress={handleLogout}
               accessibilityRole="menuitem"
               accessibilityLabel="Log Out"
             >
               <Ionicons name="log-out-outline" size={18} color={COLORS.error} style={styles.dropdownIcon} />
-              <Text style={[styles.dropdownItemText, { color: COLORS.error }]}>Log Out</Text>
+              <Text style={[styles.dropdownItemText, { color: COLORS.error }]} maxFontSizeMultiplier={1.3}>Log Out</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -198,114 +203,44 @@ export default function HomeScreen({ navigation }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Large Customer Search Bar */}
-        <View style={styles.searchSection}>
-          <TouchableOpacity
-            style={styles.searchBar}
-            onPress={() => navigation.navigate('CustomerSearch')}
-            activeOpacity={0.8}
-            accessibilityRole="search"
-            accessibilityLabel="Search customer by name or phone"
-          >
-            <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search customer by name or phone..."
-              placeholderTextColor={COLORS.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={handleSearchSubmit}
-              returnKeyType="search"
-            />
-            <TouchableOpacity
-              onPress={handleSearchSubmit}
-              style={styles.searchSubmitBtn}
-              accessibilityLabel="Execute search"
-            >
-              <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </View>
+        {/* Customer Search Bar */}
+        <TouchableOpacity
+          testID="home-search-bar-btn"
+          style={styles.searchBar}
+          onPress={() => navigation.navigate('CustomerSearch')}
+          activeOpacity={0.8}
+          accessibilityRole="search"
+          accessibilityLabel="Search customer by name or phone"
+        >
+          <Ionicons name="search" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
+          <Text style={styles.searchPlaceholder} maxFontSizeMultiplier={1.3}>
+            Search customers by name or phone
+          </Text>
+        </TouchableOpacity>
 
-        {/* Two Hero Action Cards */}
-        <View style={styles.heroRow}>
-          {/* Card 1: Find Customer */}
-          <TouchableOpacity
-            style={[styles.heroCard, styles.heroCardDark]}
-            onPress={() => navigation.navigate('CustomerSearch')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Find Customer. Search & view history."
-          >
-            <View style={styles.heroIconBoxDark}>
-              <Ionicons name="search" size={24} color="#FFFFFF" />
-            </View>
-            <Text style={styles.heroTitleLight}>Find Customer</Text>
-            <Text style={styles.heroSubtitleLight}>Search & view history</Text>
-          </TouchableOpacity>
+        {/* Record Purchase CTA */}
+        <TouchableOpacity
+          testID="home-hero-record-purchase"
+          style={styles.recordPurchaseBtn}
+          onPress={() => navigation.navigate('AddPurchase')}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Record a new purchase"
+        >
+          <Ionicons name="add" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
+          <Text style={styles.recordPurchaseBtnText} maxFontSizeMultiplier={1.3}>Record purchase</Text>
+        </TouchableOpacity>
 
-          {/* Card 2: Record Purchase */}
-          <TouchableOpacity
-            style={[styles.heroCard, styles.heroCardPrimary]}
-            onPress={() => navigation.navigate('AddPurchase')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Record Purchase. Add customer or medicines."
-          >
-            <View style={styles.heroIconBoxPrimary}>
-              <Ionicons name="add" size={26} color={COLORS.primary} />
-            </View>
-            <Text style={styles.heroTitleLight}>Record Purchase</Text>
-            <Text style={styles.heroSubtitleLight}>Add customer or medicines</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Today's Summary */}
+        {/* Recent Customers Section */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Today's Summary</Text>
+          <Text style={styles.sectionTitle} maxFontSizeMultiplier={1.3}>Recent customers</Text>
           <TouchableOpacity
-            onPress={() => navigation.navigate('CustomerSearch', { initialFilter: 'recent' })}
-            accessibilityRole="button"
-            accessibilityLabel="See all summary"
-          >
-            <Text style={styles.seeAllText}>See All</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.statsRow}>
-          <StatCard
-            label="Purchases"
-            value={summary.todayPurchases}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Customers"
-            value={summary.todayCustomers}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Sales"
-            value={`₹${summary.todaySales}`}
-            highlightColor={COLORS.primary}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Due"
-            value={`₹${summary.todayDues}`}
-            highlightColor={summary.todayDues > 0 ? COLORS.error : COLORS.text}
-            style={styles.statCardItem}
-          />
-        </View>
-
-        {/* Recent Customers */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Recent Customers</Text>
-          <TouchableOpacity
+            testID="home-see-all-recent"
             onPress={() => navigation.navigate('CustomerSearch')}
             accessibilityRole="button"
             accessibilityLabel="See all customers"
           >
-            <Text style={styles.seeAllText}>See All</Text>
+            <Text style={styles.seeAllText} maxFontSizeMultiplier={1.3}>See all</Text>
           </TouchableOpacity>
         </View>
 
@@ -315,13 +250,14 @@ export default function HomeScreen({ navigation }) {
           </View>
         ) : summary.recentCustomers.length === 0 ? (
           <View style={styles.emptyRecentCard}>
-            <Ionicons name="people-outline" size={36} color={COLORS.textMuted} />
-            <Text style={styles.emptyRecentText}>No recent customers yet.</Text>
+            <Ionicons name="people-outline" size={32} color={COLORS.textMuted} />
+            <Text style={styles.emptyRecentText} maxFontSizeMultiplier={1.3}>No recent customers yet.</Text>
             <TouchableOpacity
+              testID="home-empty-add-customer-btn"
               style={styles.emptyAddCustBtn}
               onPress={() => navigation.navigate('AddCustomer')}
             >
-              <Text style={styles.emptyAddCustBtnText}>+ Add First Customer</Text>
+              <Text style={styles.emptyAddCustBtnText} maxFontSizeMultiplier={1.3}>+ Add First Customer</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -334,6 +270,7 @@ export default function HomeScreen({ navigation }) {
               return (
                 <TouchableOpacity
                   key={cust.customer_id}
+                  testID={`home-recent-customer-${cust.customer_id}`}
                   style={styles.recentCustomerItem}
                   onPress={() =>
                     navigation.navigate('CustomerProfile', {
@@ -345,10 +282,14 @@ export default function HomeScreen({ navigation }) {
                   accessibilityRole="button"
                   accessibilityLabel={`${cust.name}, last purchase ${formattedDate}`}
                 >
-                  <Avatar name={cust.name} size={44} />
+                  <Avatar name={cust.name} size={42} showBorder />
                   <View style={styles.recentMeta}>
-                    <Text style={styles.recentName}>{cust.name}</Text>
-                    <Text style={styles.recentDate}>Last purchase: {formattedDate}</Text>
+                    <Text style={styles.recentName} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+                      {cust.name}
+                    </Text>
+                    <Text style={styles.recentDate} numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3}>
+                      Last purchase · {formattedDate}
+                    </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
                 </TouchableOpacity>
@@ -358,7 +299,7 @@ export default function HomeScreen({ navigation }) {
         )}
       </ScrollView>
 
-      {/* 5-Tab Navigation Bar */}
+      {/* 2-Tab Navigation Bar */}
       <BottomNavBar currentRoute="Home" navigation={navigation} />
     </SafeAreaView>
   );
@@ -373,47 +314,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
-    paddingBottom: SPACING.sm,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 16 : 10,
+    paddingBottom: 12,
+    backgroundColor: COLORS.background,
   },
   headerLeft: {
     flex: 1,
   },
   greetingText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textMuted,
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.text,
+    letterSpacing: -0.3,
   },
   shopNameText: {
-    ...TYPOGRAPHY.h2,
-    fontSize: 20,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginTop: 1,
-  },
-  dateText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.primary,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
     marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   avatarBtn: {
     padding: 2,
     borderRadius: 24,
-    borderWidth: 2,
-    borderColor: 'transparent',
   },
   avatarBtnActive: {
-    borderColor: COLORS.primary,
+    // subtle glow on active
   },
   menuBackdrop: {
     position: 'absolute',
@@ -425,8 +351,8 @@ const styles = StyleSheet.create({
   },
   dropdownMenu: {
     position: 'absolute',
-    top: 75,
-    right: SPACING.lg,
+    top: 80,
+    right: 20,
     width: 200,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
@@ -434,25 +360,25 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
     elevation: 8,
     zIndex: 999,
-    paddingVertical: SPACING.xs,
+    paddingVertical: 4,
   },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     minHeight: 44,
   },
   dropdownIcon: {
-    marginRight: SPACING.sm,
+    marginRight: 10,
   },
   dropdownItemText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '500',
     color: COLORS.text,
   },
   dropdownDivider: {
@@ -461,120 +387,62 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
-  },
-  searchSection: {
-    marginBottom: SPACING.md,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   searchBar: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-    minHeight: TOUCH_TARGETS.minHeight,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    paddingHorizontal: 14,
+    marginBottom: 12,
   },
   searchIcon: {
-    marginRight: SPACING.sm,
+    marginRight: 10,
   },
-  searchInput: {
+  searchPlaceholder: {
     flex: 1,
-    ...TYPOGRAPHY.body,
-    fontSize: 16,
-    color: COLORS.text,
-    paddingVertical: 10,
+    fontSize: 15,
+    color: COLORS.textMuted,
   },
-  searchSubmitBtn: {
-    padding: SPACING.xs,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
-  heroCard: {
-    flex: 1,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    justifyContent: 'space-between',
-    minHeight: 120,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  heroCardDark: {
-    backgroundColor: '#352520',
-  },
-  heroCardPrimary: {
+  recordPurchaseBtn: {
+    height: 52,
     backgroundColor: COLORS.primary,
-  },
-  heroIconBoxDark: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
+    borderRadius: RADIUS.md,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  heroIconBoxPrimary: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: 20,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  heroTitleLight: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
+  recordPurchaseBtnText: {
+    fontSize: 17,
     fontWeight: '700',
     color: '#FFFFFF',
-  },
-  heroSubtitleLight: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 2,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
-    paddingHorizontal: 2,
+    marginBottom: 10,
   },
   sectionTitle: {
-    ...TYPOGRAPHY.h3,
     fontSize: 17,
     fontWeight: '700',
     color: COLORS.text,
   },
   seeAllText: {
-    ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
+    fontSize: 14,
     color: COLORS.primary,
-    fontWeight: '700',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    marginBottom: SPACING.lg,
-  },
-  statCardItem: {
-    flex: 1,
-    paddingHorizontal: 4,
+    fontWeight: '600',
   },
   recentList: {
     backgroundColor: COLORS.surface,
@@ -586,24 +454,22 @@ const styles = StyleSheet.create({
   recentCustomerItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    minHeight: TOUCH_TARGETS.minHeight,
+    minHeight: 60,
   },
   recentMeta: {
     flex: 1,
-    marginLeft: SPACING.md,
+    marginLeft: 12,
   },
   recentName: {
-    ...TYPOGRAPHY.label,
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
   },
   recentDate: {
-    ...TYPOGRAPHY.caption,
     fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
@@ -611,35 +477,32 @@ const styles = StyleSheet.create({
   emptyRecentCard: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
-    padding: SPACING.xl,
+    padding: 24,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   emptyRecentText: {
-    ...TYPOGRAPHY.body,
     fontSize: 15,
     color: COLORS.textMuted,
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.md,
+    marginTop: 8,
+    marginBottom: 16,
   },
   emptyAddCustBtn: {
-    minHeight: TOUCH_TARGETS.minHeight,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
+    height: 48,
+    paddingHorizontal: 20,
     borderRadius: RADIUS.md,
     backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   emptyAddCustBtnText: {
-    ...TYPOGRAPHY.label,
     fontSize: 15,
     color: COLORS.primary,
     fontWeight: '700',
   },
   loadingContainer: {
-    padding: SPACING.xl,
+    padding: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },

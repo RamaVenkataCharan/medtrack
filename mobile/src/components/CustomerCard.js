@@ -17,6 +17,7 @@ export default function CustomerCard({ customer, onPress, onDelete }) {
 
   return (
     <TouchableOpacity
+      testID={`customer-card-${customer.customer_id}`}
       style={[
         styles.card,
         hasDue ? styles.cardWithDue : styles.cardPaid,
@@ -27,27 +28,52 @@ export default function CustomerCard({ customer, onPress, onDelete }) {
       {/* Top Row: Avatar + Customer Details + Due Status Badge */}
       <View style={styles.topRow}>
         <View style={styles.avatarWrap}>
-          <Text style={styles.avatarText}>{initial}</Text>
+          <Text style={styles.avatarText} maxFontSizeMultiplier={1.3}>{initial}</Text>
         </View>
 
         <View style={styles.infoCol}>
-          <Text style={styles.name} numberOfLines={1}>{customer.name}</Text>
+          <Text
+            testID={`customer-name-${customer.customer_id}`}
+            style={styles.name}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            maxFontSizeMultiplier={1.3}
+          >
+            {customer.name}
+          </Text>
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
-              <Ionicons name="call-outline" size={12} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
-              <Text style={styles.metaText}>{customer.phone_number}</Text>
+              <Ionicons name="call-outline" size={11} color={COLORS.textSecondary} style={{ marginRight: 3 }} />
+              <Text
+                testID={`customer-phone-${customer.customer_id}`}
+                style={styles.metaText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                maxFontSizeMultiplier={1.3}
+              >
+                {customer.phone_number}
+              </Text>
             </View>
 
             {customer.village ? (
               <View style={styles.metaItem}>
-                <Ionicons name="location-outline" size={12} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
-                <Text style={styles.metaText}>{customer.village}</Text>
+                <Ionicons name="location-outline" size={11} color={COLORS.textSecondary} style={{ marginRight: 3 }} />
+                <Text
+                  testID={`customer-village-${customer.customer_id}`}
+                  style={styles.metaText}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  maxFontSizeMultiplier={1.3}
+                >
+                  {customer.village}
+                </Text>
               </View>
             ) : null}
           </View>
         </View>
 
         <View
+          testID={`customer-due-badge-${customer.customer_id}`}
           style={[
             styles.dueBadge,
             hasDue ? styles.dueBadgeAlert : styles.dueBadgePaid,
@@ -55,15 +81,17 @@ export default function CustomerCard({ customer, onPress, onDelete }) {
         >
           <Ionicons
             name={hasDue ? 'time-outline' : 'checkmark-circle'}
-            size={12}
+            size={11}
             color={hasDue ? COLORS.dueBadgeText : COLORS.paymentGreen}
-            style={{ marginRight: 4 }}
+            style={{ marginRight: 3 }}
           />
           <Text
             style={[
               styles.dueText,
               hasDue ? styles.dueTextAlert : styles.dueTextPaid,
             ]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.3}
           >
             {formatDue(numericDue)}
           </Text>
@@ -73,26 +101,28 @@ export default function CustomerCard({ customer, onPress, onDelete }) {
       {/* Divider */}
       <View style={styles.divider} />
 
-      {/* Bottom Action Row: Enterprise Actions */}
+      {/* Bottom Action Row */}
       <View style={styles.actionsRow}>
         <TouchableOpacity
+          testID={`customer-view-btn-${customer.customer_id}`}
           style={styles.viewButton}
           onPress={onPress}
           activeOpacity={0.8}
         >
-          <Text style={styles.viewButtonText}>View Ledger</Text>
-          <Ionicons name="chevron-forward" size={13} color={COLORS.primary} style={{ marginLeft: 3 }} />
+          <Text style={styles.viewButtonText} maxFontSizeMultiplier={1.3}>View Ledger</Text>
+          <Ionicons name="chevron-forward" size={12} color={COLORS.primary} style={{ marginLeft: 3 }} />
         </TouchableOpacity>
 
         {onDelete ? (
           <TouchableOpacity
+            testID={`customer-delete-btn-${customer.customer_id}`}
             style={styles.deleteButton}
             onPress={onDelete}
             activeOpacity={0.7}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel="Delete customer"
           >
-            <Ionicons name="trash-outline" size={15} color={COLORS.textTertiary} />
+            <Ionicons name="trash-outline" size={14} color={COLORS.textTertiary} />
           </TouchableOpacity>
         ) : null}
       </View>
@@ -102,19 +132,21 @@ export default function CustomerCard({ customer, onPress, onDelete }) {
 
 const styles = StyleSheet.create({
   card: {
+    height: 104,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    marginVertical: SPACING.xs,
-    marginHorizontal: SPACING.lg,
+    padding: 12,
+    marginBottom: 8,
+    marginHorizontal: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
-    shadowRadius: 3,
+    shadowRadius: 2,
     elevation: 1,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
   },
   cardWithDue: {
     borderLeftWidth: 3.5,

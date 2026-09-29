@@ -31,7 +31,7 @@ export default function PurchaseDetailsScreen({ navigation, route }) {
       try {
         const details = await getPurchaseDetails(entryId);
         if (details) {
-          setEntry(details);
+          setEntry((prev) => ({ ...prev, ...details }));
         }
       } catch (err) {
         console.warn('Failed to load purchase details:', err);
@@ -47,17 +47,27 @@ export default function PurchaseDetailsScreen({ navigation, route }) {
     try {
       await softDeletePurchase(entryId || entry?.entry_id);
       setShowDeleteModal(false);
-      if (Platform.OS === 'web') {
-        alert('Purchase deleted and moved to Recycle Bin.');
-      } else {
-        Alert.alert('Deleted', 'Purchase moved to Recycle Bin.');
-      }
+      const msg = 'Purchase record moved to Recycle Bin.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Deleted', msg);
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Error', err.message || 'Could not delete purchase');
+      const msg = err.message || 'Could not delete purchase';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleEditEntry = () => {
+    navigation.navigate('AddPurchase', {
+      customerId: entry?.customer_id,
+      customer: {
+        customer_id: entry?.customer_id,
+        name: customerName,
+        phone_number: customerPhone,
+      },
+      editEntry: entry,
+    });
   };
 
   if (loading) {
@@ -78,10 +88,11 @@ export default function PurchaseDetailsScreen({ navigation, route }) {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
+            accessibilityLabel="Go back"
           >
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Purchase Details</Text>
+          <Text style={styles.headerTitle}>Purchase details</Text>
           <View style={{ width: 44 }} />
         </View>
         <View style={styles.centerContainer}>
@@ -91,10 +102,29 @@ export default function PurchaseDetailsScreen({ navigation, route }) {
     );
   }
 
-  const medicines = entry.medicines || entry.items || [];
+  const customerName =
+    entry.customer_name ||
+    entry.customers?.name ||
+    'Customer';
+  const customerPhone =
+    entry.phone_number ||
+    entry.customers?.phone_number ||
+    '';
+
+  const medicines = entry.medicines || entry.entry_medicines || entry.items || [];
   const total = parseFloat(entry.total_amount || 0);
-  const due = parseFloat(entry.due_amount || 0);
-  const dateStr = entry.entry_date ? formatDate(entry.entry_date) : 'Recent';
+
+  // Format date & time: "12 Sep 2026 · 10:24 AM"
+  const dateObj = entry.entry_date ? new Date(entry.entry_date) : new Date();
+  const dateStr = !isNaN(dateObj.getTime())
+    ? dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : 'Recent';
+  const timeStr = !isNaN(dateObj.getTime())
+    ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
+  const dateTimeFormatted = timeStr ? `${dateStr} · ${timeStr}` : dateStr;
+
+  const recordedBy = entry.created_by_name || entry.staff_name || 'Staff';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -108,133 +138,131 @@ export default function PurchaseDetailsScreen({ navigation, route }) {
         >
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Purchase Details</Text>
+        <Text style={styles.headerTitle}>Purchase details</Text>
         <TouchableOpacity
           style={styles.deleteHeaderBtn}
           onPress={() => setShowDeleteModal(true)}
           accessibilityRole="button"
           accessibilityLabel="Delete purchase"
         >
-          <Ionicons name="trash-outline" size={22} color={COLORS.error} />
+          <Ionicons name="trash-outline" size={20} color={COLORS.textMuted} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Date & Total Summary Card */}
-        <View style={styles.summaryCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.dateLabel}>Purchase Date</Text>
-            <Text style={styles.dateValue}>{dateStr}</Text>
-          </View>
-          <View style={styles.totalBadge}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
-            <Text style={styles.totalValue}>₹{total.toFixed(0)}</Text>
-          </View>
-        </View>
-
-        {/* Customer Info Card */}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Customer Profile Row */}
         <TouchableOpacity
-          style={styles.customerCard}
+          style={styles.customerRow}
           onPress={() => {
             if (entry.customer_id) {
               navigation.navigate('CustomerProfile', {
                 customerId: entry.customer_id,
                 customer: {
                   customer_id: entry.customer_id,
-                  name: entry.customer_name,
-                  phone_number: entry.phone_number,
+                  name: customerName,
+                  phone_number: customerPhone,
                 },
               });
             }
           }}
           activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`Customer: ${entry.customer_name || 'Customer'}`}
         >
-          <Avatar name={entry.customer_name || 'Customer'} size={46} />
+          <Avatar name={customerName} size={48} showBorder />
           <View style={styles.customerMeta}>
-            <Text style={styles.customerSub}>Customer</Text>
-            <Text style={styles.customerName}>{entry.customer_name || 'Unknown'}</Text>
-            <Text style={styles.customerPhone}>{entry.phone_number || 'No phone'}</Text>
+            <Text style={styles.customerName} numberOfLines={1}>
+              {customerName}
+            </Text>
+            {customerPhone ? (
+              <Text style={styles.customerPhone}>{customerPhone}</Text>
+            ) : null}
           </View>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
         </TouchableOpacity>
 
-        {/* Medicines Breakdown */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Purchased Medicines ({medicines.length})</Text>
+        {/* Date Row */}
+        <View style={styles.dateRow}>
+          <Ionicons name="calendar-outline" size={20} color={COLORS.primary} style={{ marginRight: 8 }} />
+          <Text style={styles.dateText}>{dateTimeFormatted}</Text>
         </View>
 
-        <View style={styles.medicineListCard}>
-          {medicines.map((item, idx) => {
-            const unitPrice = parseFloat(item.unit_price || item.price || 0);
-            const lineTotal = (item.quantity || 1) * unitPrice;
+        {/* Items Card */}
+        <View style={styles.itemsCard}>
+          <Text style={styles.itemsHeader}>Items</Text>
 
-            return (
-              <View
-                key={item.id || idx}
-                style={[
-                  styles.medicineRow,
-                  idx < medicines.length - 1 ? styles.medicineRowBorder : null,
-                ]}
-              >
-                <View style={styles.medIconBox}>
-                  <Ionicons name="medkit" size={16} color={COLORS.primary} />
-                </View>
-                <View style={styles.medDetails}>
-                  <Text style={styles.medName}>{item.medicine_name || item.name}</Text>
-                  <Text style={styles.medQty}>
-                    {item.quantity || 1} units × ₹{unitPrice.toFixed(0)}
-                  </Text>
-                </View>
-                <Text style={styles.medPrice}>₹{lineTotal.toFixed(0)}</Text>
+          {medicines.length === 0 ? (
+            <View style={styles.singleItemRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemName}>General Purchase</Text>
+                <Text style={styles.itemQty}>1 lump sum</Text>
               </View>
-            );
-          })}
+              <Text style={styles.itemPrice}>₹{total.toFixed(0)}</Text>
+            </View>
+          ) : (
+            medicines.map((item, idx) => {
+              const unitPrice = parseFloat(item.unit_price || item.price || 0);
+              const qty = item.quantity || 1;
+              const lineTotal = (unitPrice > 0 ? unitPrice * qty : parseFloat(item.price || 0)) || 0;
+              const unit = item.unit || 'units';
+
+              return (
+                <View key={item.id || idx} style={styles.itemRow}>
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={styles.itemName}>{item.medicine_name || item.name}</Text>
+                    <Text style={styles.itemQty}>{qty} {unit}</Text>
+                  </View>
+                  <Text style={styles.itemPrice}>₹{lineTotal > 0 ? lineTotal.toFixed(0) : '—'}</Text>
+                </View>
+              );
+            })
+          )}
+
+          {/* Divider line */}
+          <View style={styles.cardDivider} />
+
+          {/* Total Row */}
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <View style={styles.totalBadge}>
+              <Text style={styles.totalValue}>₹{total.toFixed(0)}</Text>
+            </View>
+          </View>
         </View>
 
-        {/* Payment / Due Status */}
-        {due > 0 && (
-          <View style={styles.dueAlertCard}>
-            <Ionicons name="alert-circle" size={20} color={COLORS.error} />
-            <Text style={styles.dueAlertText}>
-              Pending Due on this purchase: ₹{due.toFixed(0)}
-            </Text>
-          </View>
-        )}
-
-        {/* Notes */}
+        {/* Notes (if any) */}
         {entry.notes ? (
           <View style={styles.notesCard}>
-            <Text style={styles.notesLabel}>Notes</Text>
+            <Text style={styles.notesLabel}>Note</Text>
             <Text style={styles.notesText}>{entry.notes}</Text>
           </View>
         ) : null}
 
-        {/* Action Buttons */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => setShowDeleteModal(true)}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Delete purchase"
-          >
-            <Ionicons name="trash-outline" size={18} color={COLORS.error} style={{ marginRight: 6 }} />
-            <Text style={styles.deleteButtonText}>Delete</Text>
-          </TouchableOpacity>
+        {/* Recorded By Staff Row */}
+        <View style={styles.recordedByRow}>
+          <Ionicons name="person-outline" size={18} color={COLORS.textSecondary} style={{ marginRight: 8 }} />
+          <Text style={styles.recordedByText}>Recorded by {recordedBy}</Text>
         </View>
+
+        {/* Edit Entry Action Button */}
+        <TouchableOpacity
+          style={styles.editEntryBtn}
+          onPress={handleEditEntry}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Edit entry"
+        >
+          <Ionicons name="pencil" size={18} color={COLORS.primary} style={{ marginRight: 8 }} />
+          <Text style={styles.editEntryBtnText}>Edit entry</Text>
+        </TouchableOpacity>
       </ScrollView>
 
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal for Delete Purchase */}
       <ConfirmationModal
         visible={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleDelete}
-        title="Delete Purchase Record?"
+        title="Move Purchase to Recycle Bin?"
         message="This purchase record will be moved to the Recycle Bin. You can restore it anytime within 30 days."
-        confirmText="Delete to Bin"
-        cancelText="Keep Purchase"
+        confirmText="Move to Bin"
+        cancelText="Cancel"
         isDestructive={true}
         iconName="trash"
         confirmLoading={deleting}
@@ -253,229 +281,189 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
-    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
-    paddingBottom: SPACING.sm,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
+    paddingBottom: 12,
   },
   backButton: {
     width: TOUCH_TARGETS.minWidth,
     height: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
     alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   headerTitle: {
     ...TYPOGRAPHY.h2,
     fontSize: 20,
-    color: COLORS.text,
     fontWeight: '700',
+    color: COLORS.text,
   },
   deleteHeaderBtn: {
     width: TOUCH_TARGETS.minWidth,
     height: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
     alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: 40,
   },
-  summaryCard: {
+  customerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  customerMeta: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  customerName: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  customerPhone: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  dateText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  itemsCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20,
+  },
+  itemsHeader: {
+    ...TYPOGRAPHY.labelSmall,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginBottom: 14,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  singleItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    marginBottom: 14,
   },
-  dateLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textMuted,
-  },
-  dateValue: {
+  itemName: {
     ...TYPOGRAPHY.h3,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
+  },
+  itemQty: {
+    ...TYPOGRAPHY.bodySmall,
+    color: COLORS.textSecondary,
     marginTop: 2,
   },
-  totalBadge: {
-    alignItems: 'flex-end',
+  itemPrice: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: COLORS.borderSubtle,
+    marginVertical: 12,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 4,
   },
   totalLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textMuted,
+    ...TYPOGRAPHY.h3,
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  totalBadge: {
+    backgroundColor: COLORS.surfaceSubtle,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
   },
   totalValue: {
     ...TYPOGRAPHY.h2,
     fontSize: 22,
     fontWeight: '800',
-    color: COLORS.primary,
-  },
-  customerCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  customerMeta: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  customerSub: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  customerName: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
-    fontWeight: '700',
     color: COLORS.text,
-  },
-  customerPhone: {
-    ...TYPOGRAPHY.bodySmall,
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  sectionHeader: {
-    marginVertical: SPACING.xs,
-    paddingHorizontal: 2,
-  },
-  sectionTitle: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
-    color: COLORS.text,
-    fontWeight: '700',
-  },
-  medicineListCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.xs,
-    marginBottom: SPACING.md,
-  },
-  medicineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
-  },
-  medicineRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  medIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.sm,
-  },
-  medDetails: {
-    flex: 1,
-  },
-  medName: {
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  medQty: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  medPrice: {
-    ...TYPOGRAPHY.label,
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  dueAlertCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FDECE7',
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: '#F8B4A2',
-  },
-  dueAlertText: {
-    ...TYPOGRAPHY.body,
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.error,
-    marginLeft: SPACING.sm,
   },
   notesCard: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
+    padding: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
+    marginBottom: 20,
   },
   notesLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
+    ...TYPOGRAPHY.labelSmall,
+    color: COLORS.textSecondary,
+    fontWeight: '700',
     marginBottom: 4,
   },
   notesText: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
     color: COLORS.text,
-    lineHeight: 20,
   },
-  buttonRow: {
-    marginTop: SPACING.sm,
-  },
-  deleteButton: {
-    minHeight: TOUCH_TARGETS.minHeight,
-    borderRadius: RADIUS.md,
+  recordedByRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FDECE7',
-    borderWidth: 1,
-    borderColor: '#F8B4A2',
+    marginBottom: 28,
   },
-  deleteButtonText: {
-    ...TYPOGRAPHY.label,
+  recordedByText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  editEntryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  editEntryBtnText: {
+    ...TYPOGRAPHY.button,
     fontSize: 16,
     fontWeight: '700',
-    color: COLORS.error,
+    color: COLORS.primary,
   },
   centerContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    justifyContent: 'center',
+    padding: 32,
   },
   loadingText: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
     color: COLORS.textSecondary,
-    marginTop: SPACING.md,
+    marginTop: 12,
   },
   emptyText: {
     ...TYPOGRAPHY.body,
-    fontSize: 16,
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
   },
 });

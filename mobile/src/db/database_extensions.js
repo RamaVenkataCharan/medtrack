@@ -1,21 +1,23 @@
-import { supabase } from '../utils/supabaseClient';
-import { getCurrentLocalIso } from '../utils/dateUtils';
-import { NetworkService } from '../services/networkService';
-import { AuthService } from '../services/authService';
-import { cleanPhoneNumber, calculateCustomerTotalDue } from '../utils/khataLogic';
+import { supabase } from '../utils/supabaseClient.js';
+import { getCurrentLocalIso } from '../utils/dateUtils.js';
+import { NetworkService } from '../services/networkService.js';
+import { AuthService } from '../services/authService.js';
+import { cleanPhoneNumber, calculateCustomerTotalDue } from '../utils/khataLogic.js';
+import { demoStore } from './demoStore.js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { NotificationService } from '../services/notificationService';
+import { NotificationService } from '../services/notificationService.js';
 
 // Helper to check if current session is demo/test mode (strictly confined to development)
 async function isDemoSession() {
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return true;
   if (!Boolean(typeof __DEV__ !== 'undefined' && __DEV__)) return false;
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id && !session.user.is_demo) return false;
   } catch {}
   const currentUser = await AuthService.getCurrentUser();
-  return Boolean(currentUser && (currentUser.is_demo || !currentUser.aud));
+  return Boolean(!currentUser || currentUser.is_demo || !currentUser.aud);
 }
 
 async function getAuthUserId(requireAuth = true) {
@@ -35,88 +37,16 @@ async function getAuthUserId(requireAuth = true) {
   return null;
 }
 
-// In-Memory Dev / Demo Store for extended features (only used in demo session)
-let demoRecentPurchases = [
-  {
-    entry_id: 1,
-    customer_id: 1,
-    customer_name: 'Ramesh Kumar',
-    phone_number: '9345678901',
-    entry_date: '2025-04-12T10:24:00.000Z',
-    total_amount: 1240,
-    amount_paid: 1240,
-    due_amount: 0,
-    medicines: [
-      { id: 1, medicine_name: 'Paracetamol 500mg', quantity: 2, unit_price: 40, price: 80, original_price: 80, discount_percent: 0 },
-      { id: 2, medicine_name: 'Amoxicillin 500mg', quantity: 1, unit_price: 45, price: 45, original_price: 45, discount_percent: 0 },
-      { id: 3, medicine_name: 'Pantoprazole 40mg', quantity: 1, unit_price: 60, price: 60, original_price: 60, discount_percent: 0 },
-      { id: 4, medicine_name: 'Montelukast 10mg', quantity: 1, unit_price: 70, price: 70, original_price: 70, discount_percent: 0 },
-      { id: 5, medicine_name: 'Vitamin D3 60K', quantity: 1, unit_price: 25, price: 25, original_price: 25, discount_percent: 0 },
-    ],
-    notes: 'Regular monthly medicines',
-    deleted_at: null,
-  },
-  {
-    entry_id: 2,
-    customer_id: 1,
-    customer_name: 'Ramesh Kumar',
-    phone_number: '9345678901',
-    entry_date: '2025-03-28T14:10:00.000Z',
-    total_amount: 980,
-    amount_paid: 980,
-    due_amount: 0,
-    medicines: [
-      { id: 6, medicine_name: 'Azithromycin 500mg', quantity: 1, unit_price: 120, price: 120, original_price: 120, discount_percent: 0 },
-      { id: 7, medicine_name: 'Cetirizine 10mg', quantity: 2, unit_price: 40, price: 80, original_price: 80, discount_percent: 0 },
-    ],
-    notes: 'Cold and seasonal fever',
-    deleted_at: null,
-  },
-  {
-    entry_id: 3,
-    customer_id: 2,
-    customer_name: 'Lakshmi Devi',
-    phone_number: '9876543210',
-    entry_date: '2025-04-10T11:15:00.000Z',
-    total_amount: 1420,
-    amount_paid: 1070,
-    due_amount: 350,
-    medicines: [
-      { id: 8, medicine_name: 'Metformin 500mg', quantity: 2, unit_price: 90, price: 180, original_price: 180, discount_percent: 0 },
-      { id: 9, medicine_name: 'Amlodipine 5mg', quantity: 1, unit_price: 80, price: 80, original_price: 80, discount_percent: 0 },
-      { id: 10, medicine_name: 'Atorvastatin 10mg', quantity: 1, unit_price: 140, price: 140, original_price: 140, discount_percent: 0 },
-    ],
-    notes: 'BP & Diabetes regular refill',
-    deleted_at: null,
-  },
-  {
-    entry_id: 4,
-    customer_id: 3,
-    customer_name: 'Suresh Babu',
-    phone_number: '8123456789',
-    entry_date: '2025-04-08T16:45:00.000Z',
-    total_amount: 680,
-    amount_paid: 680,
-    due_amount: 0,
-    medicines: [
-      { id: 11, medicine_name: 'Paracetamol 650mg', quantity: 1, unit_price: 30, price: 30, original_price: 30, discount_percent: 0 },
-      { id: 12, medicine_name: 'Cough Syrup 100ml', quantity: 1, unit_price: 85, price: 85, original_price: 85, discount_percent: 0 },
-    ],
-    notes: '',
-    deleted_at: null,
-  },
-];
-
-// Durable Local Storage helpers for Custom Reminders
-async function loadPersistedReminders(userId) {
+async function getPersistedReminders(userId) {
   try {
     const key = `medtrack_custom_reminders_${userId || 'default'}`;
+    let json = null;
     if (Platform.OS === 'web') {
-      const data = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
-      return data ? JSON.parse(data) : [];
+      json = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+    } else {
+      json = await SecureStore.getItemAsync(key);
     }
-    const data = await SecureStore.getItemAsync(key);
-    return data ? JSON.parse(data) : [];
+    return json ? JSON.parse(json) : [];
   } catch {
     return [];
   }
@@ -145,53 +75,33 @@ export async function getDashboardSummary() {
   today.setHours(0, 0, 0, 0);
 
   if (await isDemoSession()) {
+    const activeCustomers = demoStore.customers.filter((c) => !c.deleted_at);
+    const recentList = activeCustomers.map((c) => {
+      const nonDeletedEntries = (c.entries || []).filter((e) => !e.deleted_at);
+      const dates = nonDeletedEntries.map((e) => new Date(e.entry_date).getTime());
+      const maxDate = dates.length > 0 ? Math.max(...dates) : null;
+      return {
+        customer_id: c.customer_id,
+        name: c.name,
+        phone_number: c.phone_number,
+        total_purchases: nonDeletedEntries.length,
+        last_purchase_date: maxDate ? new Date(maxDate).toISOString() : c.created_at,
+        total_due: calculateCustomerTotalDue(nonDeletedEntries),
+      };
+    });
+
+    recentList.sort((a, b) => new Date(b.last_purchase_date) - new Date(a.last_purchase_date));
+
     return {
-      todayPurchases: 32,
-      todayCustomers: 18,
-      todaySales: 12450,
-      todayDues: 1280,
-      recentCustomers: [
-        {
-          customer_id: 1,
-          name: 'Ramesh Kumar',
-          phone_number: '9345678901',
-          total_purchases: 23,
-          last_purchase_date: '2025-04-12T10:24:00.000Z',
-          total_due: 1280,
-        },
-        {
-          customer_id: 2,
-          name: 'Lakshmi Devi',
-          phone_number: '9876543210',
-          total_purchases: 12,
-          last_purchase_date: '2025-04-10T11:15:00.000Z',
-          total_due: 350,
-        },
-        {
-          customer_id: 3,
-          name: 'Suresh Babu',
-          phone_number: '8123456789',
-          total_purchases: 6,
-          last_purchase_date: '2025-04-08T16:45:00.000Z',
-          total_due: 0,
-        },
-        {
-          customer_id: 4,
-          name: 'Ravi Teja',
-          phone_number: '9012345678',
-          total_purchases: 15,
-          last_purchase_date: '2025-04-05T09:20:00.000Z',
-          total_due: 0,
-        },
-        {
-          customer_id: 5,
-          name: 'Raghavendra',
-          phone_number: '9012345678',
-          total_purchases: 8,
-          last_purchase_date: '2025-04-01T17:10:00.000Z',
-          total_due: 450,
-        },
-      ],
+      todayPurchases: demoStore.entries.filter((e) => !e.deleted_at).length,
+      todayCustomers: activeCustomers.length,
+      todaySales: demoStore.entries
+        .filter((e) => !e.deleted_at)
+        .reduce((sum, e) => sum + (parseFloat(e.total_amount) || 0), 0),
+      todayDues: demoStore.entries
+        .filter((e) => !e.deleted_at)
+        .reduce((sum, e) => sum + (parseFloat(e.due_amount) || 0), 0),
+      recentCustomers: recentList.slice(0, 5),
     };
   }
 
@@ -224,7 +134,8 @@ export async function getDashboardSummary() {
       entries (
         entry_id,
         entry_date,
-        due_amount
+        due_amount,
+        deleted_at
       )
     `)
     .eq('user_id', userId)
@@ -234,7 +145,7 @@ export async function getDashboardSummary() {
   if (custErr) throw custErr;
 
   const recentCustomers = (recentCustData || []).map((c) => {
-    const custEntries = c.entries || [];
+    const custEntries = (c.entries || []).filter((e) => !e.deleted_at);
     const totalDue = calculateCustomerTotalDue(custEntries);
 
     let lastPurchaseDate = null;
@@ -262,8 +173,8 @@ export async function getDashboardSummary() {
   return {
     todayPurchases,
     todayCustomers: uniqueTodayCustomers,
-    todaySales: Math.round(todaySales),
-    todayDues: Math.round(todayDues),
+    todaySales,
+    todayDues,
     recentCustomers: recentCustomers.slice(0, 5),
   };
 }
@@ -271,92 +182,81 @@ export async function getDashboardSummary() {
 /**
  * Searches customers who bought a specific medicine
  */
-export async function searchCustomersByMedicine(medicineQuery) {
+export async function searchCustomersByMedicine(medicineQuery = '') {
   await NetworkService.assertOnline();
   const trimmed = (medicineQuery || '').trim().toLowerCase();
   if (!trimmed) return [];
 
   if (await isDemoSession()) {
-    const list = [];
-    demoRecentPurchases.forEach((p) => {
-      if (p.deleted_at) return;
-      const matched = (p.medicines || []).filter((m) =>
-        (m.medicine_name || '').toLowerCase().includes(trimmed)
-      );
-      if (matched.length > 0) {
-        list.push({
-          entry_id: p.entry_id,
-          customer_id: p.customer_id,
-          customer_name: p.customer_name,
-          phone_number: p.phone_number,
-          purchase_date: p.entry_date,
-          total_amount: p.total_amount,
-          medicine_name: matched[0].medicine_name,
-          quantity: matched[0].quantity || 1,
-          matched_medicines: matched.map((m) => `${m.medicine_name} (${m.quantity || 1} qty)`),
-        });
-      }
-    });
-    return list;
+    const matchingEntries = demoStore.entries.filter(
+      (e) => !e.deleted_at && (e.medicines || []).some((m) => m.medicine_name.toLowerCase().includes(trimmed))
+    );
+    const custIds = new Set(matchingEntries.map((e) => e.customer_id));
+    return demoStore.customers
+      .filter((c) => custIds.has(c.customer_id) && !c.deleted_at)
+      .map((c) => ({
+        customer_id: c.customer_id,
+        name: c.name,
+        phone_number: c.phone_number,
+        village: c.village || '',
+        matched_medicine: trimmed,
+        total_due: calculateCustomerTotalDue(c.entries || []),
+      }));
   }
 
   const userId = await getAuthUserId();
   const { data, error } = await supabase
     .from('entry_medicines')
     .select(`
-      id,
       medicine_name,
-      quantity,
-      unit_price,
-      price,
-      entries (
+      entries!inner (
         entry_id,
-        entry_date,
-        total_amount,
         customer_id,
         deleted_at,
-        customers (
+        customers!inner (
           customer_id,
           name,
           phone_number,
-          deleted_at
+          village,
+          deleted_at,
+          entries (
+            entry_id,
+            due_amount,
+            deleted_at
+          )
         )
       )
     `)
     .eq('user_id', userId)
     .ilike('medicine_name', `%${trimmed}%`)
-    .limit(100);
+    .is('entries.deleted_at', null)
+    .is('entries.customers.deleted_at', null)
+    .limit(30);
 
   if (error) throw error;
 
   const seen = new Set();
-  const list = [];
-
-  (data || []).forEach((row) => {
-    const entry = row.entries;
-    const cust = entry?.customers;
-    if (cust && !cust.deleted_at && !entry.deleted_at && !seen.has(`${cust.customer_id}-${entry.entry_id}-${row.medicine_name}`)) {
-      seen.add(`${cust.customer_id}-${entry.entry_id}-${row.medicine_name}`);
-      list.push({
-        id: row.id,
-        entry_id: entry.entry_id,
+  const results = [];
+  for (const row of data || []) {
+    const cust = row.entries?.customers;
+    if (cust && !seen.has(cust.customer_id)) {
+      seen.add(cust.customer_id);
+      results.push({
         customer_id: cust.customer_id,
-        customer_name: cust.name,
-        customer_phone: cust.phone_number,
-        purchase_date: entry.entry_date,
-        medicine_name: row.medicine_name,
-        quantity: row.quantity || 1,
-        unit_price: parseFloat(row.unit_price || row.price || 0),
-        total_amount: entry.total_amount,
+        name: cust.name,
+        phone_number: cust.phone_number,
+        village: cust.village || '',
+        matched_medicine: row.medicine_name,
+        total_due: calculateCustomerTotalDue(cust.entries || []),
       });
     }
-  });
+  }
 
-  return list;
+  return results;
 }
 
 /**
- * Retrieves detailed breakdown of a single purchase entry
+ * Returns full details for a single purchase entry
  */
 export async function getPurchaseDetails(entryId) {
   await NetworkService.assertOnline();
@@ -364,8 +264,16 @@ export async function getPurchaseDetails(entryId) {
   if (!numericId) return null;
 
   if (await isDemoSession()) {
-    const found = demoRecentPurchases.find((p) => p.entry_id === numericId);
-    return found || null;
+    const found = demoStore.entries.find((e) => e.entry_id === numericId);
+    if (!found) return null;
+
+    const cust = demoStore.customers.find((c) => c.customer_id === found.customer_id);
+    return {
+      ...found,
+      customer_name: cust?.name || found.customer_name || 'Customer',
+      phone_number: cust?.phone_number || found.phone_number || '',
+      medicines: found.medicines || [],
+    };
   }
 
   const userId = await getAuthUserId();
@@ -434,8 +342,15 @@ export async function softDeletePurchase(entryId) {
   const now = getCurrentLocalIso();
 
   if (await isDemoSession()) {
-    const found = demoRecentPurchases.find((p) => p.entry_id === numericId);
-    if (found) found.deleted_at = now;
+    const found = demoStore.entries.find((e) => e.entry_id === numericId);
+    if (found) {
+      found.deleted_at = now;
+      const cust = demoStore.customers.find((c) => c.customer_id === found.customer_id);
+      if (cust && cust.entries) {
+        const custEntry = cust.entries.find((e) => e.entry_id === numericId);
+        if (custEntry) custEntry.deleted_at = now;
+      }
+    }
     return true;
   }
 
@@ -457,10 +372,17 @@ export async function getDeletedPurchases() {
   await NetworkService.assertOnline();
 
   if (await isDemoSession()) {
-    return demoRecentPurchases.filter((p) => p.deleted_at).map((p) => ({
-      ...p,
-      days_left: 28,
-    }));
+    return demoStore.entries
+      .filter((p) => p.deleted_at)
+      .map((p) => {
+        const cust = demoStore.customers.find((c) => c.customer_id === p.customer_id);
+        return {
+          ...p,
+          customer_name: cust?.name || p.customer_name || 'Customer',
+          phone_number: cust?.phone_number || p.phone_number || '',
+          days_left: 30,
+        };
+      });
   }
 
   const userId = await getAuthUserId();
@@ -515,8 +437,15 @@ export async function restorePurchase(entryId) {
   if (!numericId) return false;
 
   if (await isDemoSession()) {
-    const found = demoRecentPurchases.find((p) => p.entry_id === numericId);
-    if (found) found.deleted_at = null;
+    const found = demoStore.entries.find((e) => e.entry_id === numericId);
+    if (found) {
+      found.deleted_at = null;
+      const cust = demoStore.customers.find((c) => c.customer_id === found.customer_id);
+      if (cust && cust.entries) {
+        const custEntry = cust.entries.find((e) => e.entry_id === numericId);
+        if (custEntry) custEntry.deleted_at = null;
+      }
+    }
     return true;
   }
 
@@ -540,7 +469,12 @@ export async function permanentDeletePurchase(entryId) {
   if (!numericId) return false;
 
   if (await isDemoSession()) {
-    demoRecentPurchases = demoRecentPurchases.filter((p) => p.entry_id !== numericId);
+    demoStore.entries = demoStore.entries.filter((p) => p.entry_id !== numericId);
+    demoStore.customers.forEach((c) => {
+      if (c.entries) {
+        c.entries = c.entries.filter((e) => e.entry_id !== numericId);
+      }
+    });
     return true;
   }
 
@@ -557,27 +491,72 @@ export async function permanentDeletePurchase(entryId) {
 
 /**
  * Updates existing customer details
+ * Accepts either updateCustomer(customerId, { ... }) or updateCustomer({ customerId, ... })
  */
-export async function updateCustomer(customerId, { name, phone_number, village, address, notes }) {
+export async function updateCustomer(arg1, arg2) {
   await NetworkService.assertOnline();
+  let customerId, data;
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    customerId = arg1.customerId || arg1.customer_id;
+    data = arg1;
+  } else {
+    customerId = arg1;
+    data = arg2 || {};
+  }
+
   const numericId = parseInt(customerId, 10);
-  if (!numericId) return false;
+  if (!numericId) throw new Error('Valid customer ID is required to update details.');
+
   const now = getCurrentLocalIso();
-  const cleanedPhone = cleanPhoneNumber(phone_number);
+  const name = (data.name || '').trim();
+  const phone = data.phone_number || data.phone || '';
+  const cleanedPhone = cleanPhoneNumber(phone);
+  const village = (data.village || '').trim();
+  const address = (data.address || '').trim();
+  const notes = (data.notes || '').trim();
 
   if (await isDemoSession()) {
+    const cust = demoStore.customers.find((c) => c.customer_id === numericId);
+    if (cust) {
+      if (name) cust.name = name;
+      if (cleanedPhone) cust.phone_number = cleanedPhone;
+      cust.village = village;
+      cust.address = address;
+      cust.notes = notes;
+      cust.updated_at = now;
+    }
     return true;
   }
 
   const userId = await getAuthUserId();
+
+  // Validate phone uniqueness before update to prevent Postgres unique constraint collisions
+  if (cleanedPhone) {
+    const { data: existing, error: checkErr } = await supabase
+      .from('customers')
+      .select('customer_id')
+      .eq('user_id', userId)
+      .eq('phone_number', cleanedPhone)
+      .is('deleted_at', null)
+      .neq('customer_id', numericId)
+      .maybeSingle();
+
+    if (checkErr) {
+      throw new Error('Failed to verify phone number: ' + checkErr.message);
+    }
+    if (existing) {
+      throw new Error('Another customer already uses this phone number. Please use a different number.');
+    }
+  }
+
   const { error } = await supabase
     .from('customers')
     .update({
-      name: (name || '').trim(),
+      name,
       phone_number: cleanedPhone,
-      village: (village || '').trim(),
-      address: (address || '').trim(),
-      notes: (notes || '').trim(),
+      village,
+      address,
+      notes,
       updated_at: now,
     })
     .eq('user_id', userId)
@@ -588,115 +567,35 @@ export async function updateCustomer(customerId, { name, phone_number, village, 
 }
 
 /**
- * Retrieves licence reminders and custom pharmacy reminders
+ * Returns refill and prescription reminders
  */
 export async function getReminders() {
+  await NetworkService.assertOnline();
   const userId = await getAuthUserId(false);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const reminders = [];
-
-  // 1. Check shop profile validity
-  try {
-    const { data: profile } = await supabase
-      .from('shop_profile')
-      .select('pharmacist_license_validity, shop_license_validity')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (profile?.pharmacist_license_validity) {
-      const pDate = new Date(profile.pharmacist_license_validity);
-      if (!isNaN(pDate.getTime())) {
-        const days = Math.ceil((pDate - today) / (1000 * 60 * 60 * 24));
-        reminders.push({
-          id: 'rem_pharmacist_license',
-          title: 'Pharmacist Licence Expiry',
-          subtitle: `Registered pharmacist license renews on ${profile.pharmacist_license_validity}`,
-          due_date: profile.pharmacist_license_validity,
-          days_left: days,
-          is_expired: days < 0,
-          type: 'license',
-          status: days < 0 ? 'Expired' : `Expires in ${days} days`,
-        });
-      }
-    }
-
-    if (profile?.shop_license_validity) {
-      const sDate = new Date(profile.shop_license_validity);
-      if (!isNaN(sDate.getTime())) {
-        const days = Math.ceil((sDate - today) / (1000 * 60 * 60 * 24));
-        reminders.push({
-          id: 'rem_shop_license',
-          title: 'Shop Drug Licence Expiry (Form 20B/21B)',
-          subtitle: `Store drug license valid until ${profile.shop_license_validity}`,
-          due_date: profile.shop_license_validity,
-          days_left: days,
-          is_expired: days < 0,
-          type: 'license',
-          status: days < 0 ? 'Expired' : `Expires in ${days} days`,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('Reminder profile check notice:', err.message);
-  }
-
-  // 2. Custom Reminders loaded from persistent storage
-  const persistedCustom = await loadPersistedReminders(userId);
-  persistedCustom.forEach((r) => {
-    const rDate = new Date(r.due_date);
-    const days = !isNaN(rDate.getTime()) ? Math.ceil((rDate - today) / (1000 * 60 * 60 * 24)) : 0;
-    const isExpired = days < 0;
-    reminders.push({
-      ...r,
-      days_left: days,
-      is_expired: isExpired,
-      status: isExpired ? 'Expired' : 'Active',
-    });
-  });
-
-  return reminders;
+  const persisted = await getPersistedReminders(userId);
+  return persisted;
 }
 
 /**
- * Adds a new custom reminder and persists it to storage
+ * Adds a new refill reminder
  */
-export async function addReminder({ title, due_date, notes }) {
+export async function addReminder({ customerId, customerName, medicineName, daysUntilRefill = 30, notes = '' }) {
+  await NetworkService.assertOnline();
   const userId = await getAuthUserId(false);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
+  const reminders = await getPersistedReminders(userId);
+  const dueDate = new Date(Date.now() + daysUntilRefill * 86400000).toISOString();
 
-  if (!due_date || isNaN(new Date(due_date).getTime())) {
-    throw new Error('Please enter a valid due date (YYYY-MM-DD).');
-  }
-
-  const dDate = new Date(due_date);
-  const daysLeft = Math.ceil((dDate - now) / (1000 * 60 * 60 * 24));
-
-  const newRem = {
-    id: `rem_${Date.now()}`,
-    title: (title || '').trim(),
-    due_date: due_date.trim(),
-    notes: (notes || '').trim(),
-    is_completed: false,
-    type: 'custom',
-    days_left: daysLeft,
-    is_expired: daysLeft < 0,
-    status: daysLeft < 0 ? 'Expired' : 'Active',
+  const newReminder = {
+    reminder_id: Date.now(),
+    customer_id: customerId,
+    customer_name: customerName,
+    medicine_name: medicineName,
+    due_date: dueDate,
+    notes,
     created_at: new Date().toISOString(),
   };
 
-  const currentList = await loadPersistedReminders(userId);
-  currentList.unshift(newRem);
-  await savePersistedReminders(userId, currentList);
-
-  // Schedule system notification if future date
-  try {
-    await NotificationService.scheduleReminderNotification(newRem);
-  } catch (err) {
-    console.warn('Could not schedule local notification for reminder:', err?.message || err);
-  }
-
-  return newRem;
+  reminders.unshift(newReminder);
+  await savePersistedReminders(userId, reminders);
+  return newReminder;
 }

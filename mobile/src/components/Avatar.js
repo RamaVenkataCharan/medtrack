@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { COLORS, TYPOGRAPHY } from '../constants/theme';
 
-export default function Avatar({ name = '', size = 44, color, textStyle }) {
+export default function Avatar({ name = '', size = 44, color, textStyle, showBorder = false }) {
   const getInitials = (text) => {
     if (!text || typeof text !== 'string') return '?';
     const parts = text.trim().split(/\s+/);
@@ -12,13 +12,14 @@ export default function Avatar({ name = '', size = 44, color, textStyle }) {
 
   const getBackgroundColor = (str) => {
     if (color) return color;
+    // Warm palette that complements terracotta design
     const colors = [
-      '#C65D35', // Primary Terracotta
-      '#4B6B94', // Dusty Blue
-      '#437A63', // Sage Teal
-      '#9C5B7F', // Plum
-      '#D97736', // Warm Amber
-      '#5C6B73', // Slate
+      '#F5DDD0', // Warm salmon
+      '#E8D5C8', // Sand
+      '#D4C4B0', // Tan
+      '#F0D5C0', // Peach
+      '#E0CFC0', // Warm beige
+      '#F2E0D0', // Light salmon
     ];
     let hash = 0;
     for (let i = 0; i < (str || '').length; i++) {
@@ -30,7 +31,7 @@ export default function Avatar({ name = '', size = 44, color, textStyle }) {
 
   const initials = getInitials(name);
   const bgColor = getBackgroundColor(name);
-  const fontSize = Math.max(14, Math.floor(size * 0.4));
+  const fontSize = Math.max(14, Math.floor(size * 0.38));
 
   return (
     <View
@@ -41,6 +42,10 @@ export default function Avatar({ name = '', size = 44, color, textStyle }) {
           height: size,
           borderRadius: size / 2,
           backgroundColor: bgColor,
+        },
+        showBorder && {
+          borderWidth: 2,
+          borderColor: COLORS.primaryBorder,
         },
       ]}
       accessible={true}
@@ -60,7 +65,7 @@ const styles = StyleSheet.create({
   },
   text: {
     ...TYPOGRAPHY.label,
-    color: '#FFFFFF',
+    color: COLORS.text,
     fontWeight: '700',
     textAlign: 'center',
   },

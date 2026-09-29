@@ -1,5 +1,5 @@
 // mobile/src/services/authService.js
-import { supabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient.js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 

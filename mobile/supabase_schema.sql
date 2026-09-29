@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS public.entries (
   notes TEXT DEFAULT '',
   deleted_at TIMESTAMPTZ DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_user_entry_id UNIQUE (user_id, entry_id),
   CONSTRAINT fk_entries_customer FOREIGN KEY (user_id, customer_id)
     REFERENCES public.customers(user_id, customer_id) ON DELETE CASCADE

@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -24,8 +24,6 @@ import {
 } from '../db/database';
 import { formatDate } from '../utils/dateUtils';
 import Avatar from '../components/Avatar';
-import StatCard from '../components/StatCard';
-import FilterPills from '../components/FilterPills';
 import ConfirmationModal from '../components/ConfirmationModal';
 import NetworkBanner from '../components/NetworkBanner';
 
@@ -35,22 +33,24 @@ export default function CustomerProfileScreen({ route, navigation }) {
   const [customer, setCustomer] = useState(route.params?.customer || null);
   const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('history'); // 'history' | 'notes' | 'details'
-  const [purchaseSearch, setPurchaseSearch] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all'); // 'all' | 'month' | '3months'
-
-  // Payment Modal State
-  const [payModalVisible, setPayModalVisible] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [savingPayment, setSavingPayment] = useState(false);
+  const [filterMenuVisible, setFilterMenuVisible] = useState(false);
 
   // Edit Customer Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editVillage, setEditVillage] = useState('');
   const [editAddress, setEditAddress] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Payment Modal State
+  const [payModalVisible, setPayModalVisible] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
+  const savingPaymentRef = useRef(false);
+  const savingEditRef = useRef(false);
 
   // Delete Confirmation Modal State
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -64,6 +64,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
         setCustomer(cust);
         setEditName(cust.name || '');
         setEditPhone(cust.phone_number || '');
+        setEditVillage(cust.village || '');
         setEditAddress(cust.address || '');
         setEditNotes(cust.notes || '');
       }
@@ -82,6 +83,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
   );
 
   const handleRecordPayment = async () => {
+    if (savingPaymentRef.current) return;
     const amount = parseFloat(paymentAmount);
     if (!amount || amount <= 0) {
       const msg = 'Please enter a valid payment amount.';
@@ -89,6 +91,7 @@ export default function CustomerProfileScreen({ route, navigation }) {
       return;
     }
 
+    savingPaymentRef.current = true;
     setSavingPayment(true);
     try {
       await addDuePayment({
@@ -98,33 +101,45 @@ export default function CustomerProfileScreen({ route, navigation }) {
       setPaymentAmount('');
       setPayModalVisible(false);
       await loadProfile();
-    } catch (e) {
-      Alert.alert('Error', e.message || 'Could not record payment');
+      const msg = `Payment of ₹${amount.toFixed(0)} recorded successfully.`;
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Payment Recorded', msg);
+    } catch (err) {
+      const msg = err.message || 'Could not record payment. Please try again.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Payment Failed', msg);
     } finally {
+      savingPaymentRef.current = false;
       setSavingPayment(false);
     }
   };
 
-  const handleSaveCustomerEdits = async () => {
+  const handleSaveCustomer = async () => {
+    if (savingEditRef.current) return;
     if (!editName.trim()) {
-      const msg = 'Customer name cannot be empty.';
-      Platform.OS === 'web' ? alert(msg) : Alert.alert('Required', msg);
+      const msg = 'Customer name is required.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Validation Error', msg);
       return;
     }
 
+    savingEditRef.current = true;
     setSavingEdit(true);
     try {
-      await updateCustomer(customerId, {
+      await updateCustomer({
+        customerId,
         name: editName.trim(),
-        phone_number: editPhone.trim(),
+        phone: editPhone.trim(),
+        village: editVillage.trim(),
         address: editAddress.trim(),
         notes: editNotes.trim(),
       });
       setEditModalVisible(false);
       await loadProfile();
-    } catch (e) {
-      Alert.alert('Save Failed', e.message || 'Could not update customer');
+      const msg = 'Customer details updated.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Success', msg);
+    } catch (err) {
+      const msg = err.message || 'Could not update customer.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Update Failed', msg);
     } finally {
+      savingEditRef.current = false;
       setSavingEdit(false);
     }
   };
@@ -134,124 +149,77 @@ export default function CustomerProfileScreen({ route, navigation }) {
     try {
       await softDeleteCustomer(customerId);
       setDeleteModalVisible(false);
+      const msg = `${customer?.name || 'Customer'} moved to Recycle Bin.`;
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Customer Deleted', msg);
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Delete Failed', err.message || 'Could not delete customer');
+      const msg = err.message || 'Could not delete customer.';
+      Platform.OS === 'web' ? alert(msg) : Alert.alert('Delete Failed', msg);
     } finally {
       setDeleting(false);
     }
   };
 
-  // Filter purchases according to search and time range
-  const filteredLedger = ledger.filter((entry) => {
-    // Search query matching medicines or notes
-    if (purchaseSearch.trim().length > 0) {
-      const query = purchaseSearch.toLowerCase();
-      const hasMed = (entry.medicines || []).some((m) =>
-        (m.medicine_name || '').toLowerCase().includes(query)
-      );
-      const hasNote = (entry.notes || '').toLowerCase().includes(query);
-      if (!hasMed && !hasNote) return false;
-    }
+  // Filter ledger entries
+  const filteredLedger = useMemo(() => {
+    const now = new Date();
+    return ledger.filter((entry) => {
+      if (historyFilter === 'all') return true;
+      const entryDate = new Date(entry.entry_date);
+      if (historyFilter === 'month') {
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setDate(now.getDate() - 30);
+        return entryDate >= oneMonthAgo;
+      }
+      if (historyFilter === '3months') {
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setDate(now.getDate() - 90);
+        return entryDate >= threeMonthsAgo;
+      }
+      return true;
+    });
+  }, [ledger, historyFilter]);
 
-    if (historyFilter === 'month') {
-      const entryTime = new Date(entry.entry_date || 0).getTime();
-      const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      return entryTime >= oneMonthAgo;
-    } else if (historyFilter === '3months') {
-      const entryTime = new Date(entry.entry_date || 0).getTime();
-      const threeMonthsAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
-      return entryTime >= threeMonthsAgo;
-    }
+  // Group purchases by formatted date header (e.g. "12 Sep 2026")
+  const groupedPurchases = useMemo(() => {
+    const groups = {};
+    filteredLedger.forEach((entry) => {
+      const dateObj = new Date(entry.entry_date);
+      const dayKey = !isNaN(dateObj.getTime())
+        ? dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : 'Recent Purchases';
+      if (!groups[dayKey]) {
+        groups[dayKey] = [];
+      }
+      groups[dayKey].push(entry);
+    });
+    return Object.entries(groups).map(([date, entries]) => ({
+      date,
+      entries,
+    }));
+  }, [filteredLedger]);
 
-    return true;
-  });
-
-  // Calculate metrics
-  const totalPurchases = ledger.length;
-  const totalSpent = ledger.reduce(
-    (sum, e) => sum + parseFloat(e.total_amount || 0),
-    0
-  );
   const totalDue = parseFloat(customer?.total_due || 0);
-  const lastPurchaseDate = ledger.length > 0 ? ledger[0].entry_date : null;
 
-  const historyFilterOptions = [
-    { key: 'all', label: 'All', count: ledger.length },
-    { key: 'month', label: 'This Month' },
-    { key: '3months', label: 'Last 3 Months' },
-  ];
-
-  const renderPurchaseItem = ({ item }) => {
-    const medicines = item.medicines || [];
-    const dateFormatted = formatDate(item.entry_date);
-    const amount = parseFloat(item.total_amount || 0);
-
-    return (
-      <TouchableOpacity
-        style={styles.purchaseCard}
-        onPress={() =>
-          navigation.navigate('PurchaseDetails', {
-            entryId: item.entry_id,
-            entry: {
-              ...item,
-              customer_name: customer?.name,
-              phone_number: customer?.phone_number,
-              customer_id: customerId,
-            },
-          })
-        }
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel={`Purchase on ${dateFormatted}, total ₹${amount.toFixed(0)}`}
-      >
-        <View style={styles.purchaseCardHeader}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.purchaseDate}>{dateFormatted}</Text>
-            <Text style={styles.purchaseItemCount}>
-              {medicines.length} {medicines.length === 1 ? 'item' : 'items'}
-            </Text>
-          </View>
-          <Text style={styles.purchaseTotal}>₹{amount.toFixed(0)}</Text>
-        </View>
-
-        {/* Medicine line items breakdown */}
-        {medicines.length > 0 && (
-          <View style={styles.medBreakdownList}>
-            {medicines.map((m, idx) => (
-              <View key={m.id || idx} style={styles.medLineItem}>
-                <View style={styles.medLineLeft}>
-                  <Ionicons name="medkit-outline" size={14} color={COLORS.primary} />
-                  <Text style={styles.medLineName} numberOfLines={1}>
-                    {m.medicine_name}
-                  </Text>
-                </View>
-                <Text style={styles.medLineQty}>
-                  {m.quantity || 1} × ₹{parseFloat(m.unit_price || m.price || 0).toFixed(0)}
-                </Text>
-                <Text style={styles.medLinePrice}>
-                  ₹{(parseFloat(m.unit_price || m.price || 0) * (m.quantity || 1)).toFixed(0)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <View style={styles.purchaseCardFooter}>
-          <Text style={styles.viewDetailsText}>View Purchase Details</Text>
-          <Ionicons name="chevron-forward" size={14} color={COLORS.primary} />
-        </View>
-      </TouchableOpacity>
-    );
+  const getFilterLabel = () => {
+    switch (historyFilter) {
+      case 'month':
+        return 'Last 30 days';
+      case '3months':
+        return 'Last 3 months';
+      default:
+        return 'All purchases';
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <NetworkBanner />
 
-      {/* Top Header */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
+          testID="cust-profile-back-btn"
           style={styles.backButton}
           onPress={() => navigation.goBack()}
           accessibilityRole="button"
@@ -259,16 +227,17 @@ export default function CustomerProfileScreen({ route, navigation }) {
         >
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {customer?.name || 'Customer Profile'}
-        </Text>
+
+        {/* Filter pill dropdown button on right */}
         <TouchableOpacity
-          style={styles.editHeaderBtn}
-          onPress={() => setEditModalVisible(true)}
+          style={styles.filterPill}
+          onPress={() => setFilterMenuVisible(true)}
+          activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel="Edit Customer"
+          accessibilityLabel={`Filter: ${getFilterLabel()}`}
         >
-          <Ionicons name="create-outline" size={22} color={COLORS.primary} />
+          <Text style={styles.filterPillText}>{getFilterLabel()}</Text>
+          <Ionicons name="chevron-down" size={16} color={COLORS.textSecondary} style={{ marginLeft: 4 }} />
         </TouchableOpacity>
       </View>
 
@@ -278,211 +247,53 @@ export default function CustomerProfileScreen({ route, navigation }) {
           <Text style={styles.loadingText}>Loading customer records...</Text>
         </View>
       ) : (
-        <View style={{ flex: 1 }}>
-          {/* Fixed Customer Meta Profile */}
-          <View style={styles.customerHeaderCard}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Customer Profile Hero Section */}
+          <View style={styles.profileSection}>
             <View style={styles.profileRow}>
-              <Avatar name={customer?.name || 'Customer'} size={56} />
+              <Avatar name={customer?.name || 'Customer'} size={56} showBorder />
               <View style={styles.profileMeta}>
-                <Text style={styles.profileName}>{customer?.name}</Text>
-                <Text style={styles.profilePhone}>{customer?.phone_number || 'No phone number'}</Text>
-                <Text style={styles.customerSince}>
-                  Customer since {customer?.created_at ? formatDate(customer.created_at) : 'Jan 2024'}
+                <Text style={styles.customerName} numberOfLines={1} ellipsizeMode="tail">
+                  {customer?.name}
+                </Text>
+                <Text style={styles.customerPhone}>
+                  {customer?.phone_number || 'No phone number'}
                 </Text>
               </View>
+              {/* More / Edit Actions */}
+              <TouchableOpacity
+                style={styles.editActionBtn}
+                onPress={() => setEditModalVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Edit Customer Info"
+              >
+                <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
             </View>
 
-            {/* 4 Stat Cards in a row (Purchases, Total Spent, Due Amount, Last Purchase) */}
-            <View style={styles.statsRow}>
-              <StatCard
-                label="Purchases"
-                value={totalPurchases}
-                style={styles.statItem}
-              />
-              <StatCard
-                label="Total Spent"
-                value={`₹${totalSpent.toFixed(0)}`}
-                style={styles.statItem}
-              />
-              <StatCard
-                label="Due Amount"
-                value={`₹${totalDue.toFixed(0)}`}
-                highlightColor={totalDue > 0 ? COLORS.error : COLORS.text}
-                style={styles.statItem}
-              />
-              <StatCard
-                label="Last Purchase"
-                value={lastPurchaseDate ? formatDate(lastPurchaseDate).split(' ')[0] : 'None'}
-                style={styles.statItem}
-              />
-            </View>
-
-            {/* Unpaid Balance Action Banner if dues exist */}
+            {/* If due balance exists, subtle due notice */}
             {totalDue > 0 && (
-              <View style={styles.dueAlertBanner}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.dueAlertTitle}>Unpaid Due Balance</Text>
-                  <Text style={styles.dueAlertAmount}>₹{totalDue.toFixed(2)}</Text>
+              <View style={styles.dueNoticeRow}>
+                <View style={styles.dueNoticeLeft}>
+                  <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
+                  <Text style={styles.dueNoticeText}>
+                    Pending due: <Text style={{ fontWeight: '700' }}>₹{totalDue.toFixed(0)}</Text>
+                  </Text>
                 </View>
                 <TouchableOpacity
-                  style={styles.recordPayBtn}
+                  style={styles.duePaySmallBtn}
                   onPress={() => setPayModalVisible(true)}
                   activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Record Payment"
                 >
-                  <Text style={styles.recordPayBtnText}>Record Payment</Text>
+                  <Text style={styles.duePaySmallBtnText}>Record Payment</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Tab navigation pills: Purchase History | Notes | Details */}
-            <View style={styles.subTabRow}>
-              <TouchableOpacity
-                style={[styles.subTab, activeTab === 'history' && styles.subTabActive]}
-                onPress={() => setActiveTab('history')}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeTab === 'history' }}
-              >
-                <Text
-                  style={[
-                    styles.subTabText,
-                    activeTab === 'history' && styles.subTabTextActive,
-                  ]}
-                >
-                  Purchase History
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.subTab, activeTab === 'notes' && styles.subTabActive]}
-                onPress={() => setActiveTab('notes')}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeTab === 'notes' }}
-              >
-                <Text
-                  style={[
-                    styles.subTabText,
-                    activeTab === 'notes' && styles.subTabTextActive,
-                  ]}
-                >
-                  Notes
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.subTab, activeTab === 'details' && styles.subTabActive]}
-                onPress={() => setActiveTab('details')}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeTab === 'details' }}
-              >
-                <Text
-                  style={[
-                    styles.subTabText,
-                    activeTab === 'details' && styles.subTabTextActive,
-                  ]}
-                >
-                  Details
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Tab Content */}
-          {activeTab === 'history' ? (
-            <View style={{ flex: 1 }}>
-              {/* Search Inside Customer Purchases */}
-              <View style={styles.searchWrap}>
-                <View style={styles.searchBar}>
-                  <Ionicons name="search" size={18} color={COLORS.textMuted} style={{ marginRight: 6 }} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search in this customer's purchases..."
-                    placeholderTextColor={COLORS.textMuted}
-                    value={purchaseSearch}
-                    onChangeText={setPurchaseSearch}
-                    clearButtonMode="while-editing"
-                  />
-                </View>
-              </View>
-
-              {/* Date Filters: All | This Month | Last 3 Months */}
-              <View style={styles.filterWrap}>
-                <FilterPills
-                  options={historyFilterOptions}
-                  selected={historyFilter}
-                  onSelect={setHistoryFilter}
-                />
-              </View>
-
-              {filteredLedger.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="receipt-outline" size={44} color={COLORS.textMuted} />
-                  <Text style={styles.emptyTitle}>No Purchases Found</Text>
-                  <Text style={styles.emptySubtitle}>
-                    {purchaseSearch
-                      ? `No purchases matched "${purchaseSearch}".`
-                      : 'No purchase records recorded yet for this customer.'}
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={filteredLedger}
-                  keyExtractor={(item) => String(item.entry_id)}
-                  renderItem={renderPurchaseItem}
-                  contentContainerStyle={styles.listContent}
-                  showsVerticalScrollIndicator={false}
-                />
-              )}
-            </View>
-          ) : activeTab === 'notes' ? (
-            <View style={styles.tabContentContainer}>
-              <View style={styles.cardBox}>
-                <Text style={styles.cardBoxTitle}>Customer Notes</Text>
-                <Text style={styles.cardBoxText}>
-                  {customer?.notes || 'No customer notes recorded yet.'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.editNotesBtn}
-                  onPress={() => setEditModalVisible(true)}
-                >
-                  <Ionicons name="pencil" size={16} color={COLORS.primary} style={{ marginRight: 4 }} />
-                  <Text style={styles.editNotesBtnText}>Edit Notes</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.tabContentContainer}>
-              <View style={styles.cardBox}>
-                <Text style={styles.cardBoxTitle}>Customer Details</Text>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Full Name</Text>
-                  <Text style={styles.detailValue}>{customer?.name}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Phone Number</Text>
-                  <Text style={styles.detailValue}>{customer?.phone_number || 'None'}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Address</Text>
-                  <Text style={styles.detailValue}>{customer?.address || 'None'}</Text>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.deleteCustBtn}
-                  onPress={() => setDeleteModalVisible(true)}
-                >
-                  <Ionicons name="trash-outline" size={18} color={COLORS.error} style={{ marginRight: 6 }} />
-                  <Text style={styles.deleteCustBtnText}>Move to Recycle Bin</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {/* Sticky Bottom Action: + New Purchase */}
-          <View style={styles.bottomBar}>
+            {/* Prominent "+ Record purchase" Action Button */}
             <TouchableOpacity
-              style={styles.newPurchaseBtn}
+              testID="cust-record-purchase-btn"
+              style={styles.recordPurchaseBtn}
               onPress={() =>
                 navigation.navigate('AddPurchase', {
                   customerId,
@@ -491,117 +302,327 @@ export default function CustomerProfileScreen({ route, navigation }) {
               }
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel={`New Purchase for ${customer?.name}`}
+              accessibilityLabel="Record purchase for this customer"
             >
-              <Ionicons name="add" size={24} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={styles.newPurchaseBtnText}>
-                + New Purchase for {customer?.name || 'Customer'}
-              </Text>
+              <Ionicons name="add" size={22} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.recordPurchaseBtnText}>Record purchase</Text>
             </TouchableOpacity>
           </View>
-        </View>
+
+          {/* Purchase History Section */}
+          <View style={styles.historySection}>
+            <Text style={styles.sectionTitle}>Purchase history</Text>
+
+            {groupedPurchases.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="receipt-outline" size={44} color={COLORS.borderStrong} />
+                <Text style={styles.emptyTitle}>No purchases recorded</Text>
+                <Text style={styles.emptySubtitle}>
+                  {historyFilter === 'all'
+                    ? 'Start tracking medicine purchases for this customer.'
+                    : 'No purchases found for this filter period.'}
+                </Text>
+              </View>
+            ) : (
+              groupedPurchases.map((group) => (
+                <View key={group.date} style={styles.dateGroup}>
+                  <Text style={styles.dateHeader}>{group.date}</Text>
+
+                  {group.entries.map((entry) => {
+                    const entryMedicines = entry.medicines || [];
+                    const timeStr = entry.entry_date
+                      ? new Date(entry.entry_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : '';
+                    const fullDateStr = entry.entry_date
+                      ? `${group.date} · ${timeStr}`
+                      : group.date;
+
+                    // If entry has medicines, show each item row
+                    if (entryMedicines.length > 0) {
+                      return entryMedicines.map((med, medIdx) => {
+                        const medPrice = (parseFloat(med.price || med.unit_price || 0) * (med.quantity || 1)).toFixed(0);
+                        const quantityText = `${med.quantity || 1} ${med.unit || 'units'}`;
+
+                        return (
+                          <TouchableOpacity
+                            key={`${entry.entry_id}-${med.id || medIdx}`}
+                            style={styles.historyCard}
+                            onPress={() =>
+                              navigation.navigate('PurchaseDetails', {
+                                entryId: entry.entry_id,
+                                entry: {
+                                  ...entry,
+                                  customer_name: customer?.name,
+                                  phone_number: customer?.phone_number,
+                                },
+                              })
+                            }
+                            activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${med.medicine_name}, ${quantityText}, ₹${medPrice}`}
+                          >
+                            <View style={styles.medIconBadge}>
+                              <Ionicons name="medkit" size={16} color={COLORS.primary} />
+                            </View>
+
+                            <View style={styles.historyInfo}>
+                              <Text style={styles.historyMedName} numberOfLines={1}>
+                                {med.medicine_name}
+                              </Text>
+                              <Text style={styles.historyQty}>{quantityText}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                <Text style={styles.historyTimestamp}>{fullDateStr}</Text>
+                                {entry.is_pending && (
+                                  <View style={styles.pendingBadge}>
+                                    <Ionicons name="time-outline" size={11} color="#B45309" style={{ marginRight: 2 }} />
+                                    <Text style={styles.pendingBadgeText}>Pending sync</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+
+                            <View style={styles.historyRight}>
+                              <Text style={styles.historyPrice}>₹{medPrice}</Text>
+                              <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      });
+                    }
+
+                    // Fallback for entry with no itemized medicines (e.g. lump sum)
+                    const entryTotal = parseFloat(entry.total_amount || 0).toFixed(0);
+                    return (
+                      <TouchableOpacity
+                        key={entry.entry_id}
+                        style={styles.historyCard}
+                        onPress={() =>
+                          navigation.navigate('PurchaseDetails', {
+                            entryId: entry.entry_id,
+                            entry: {
+                              ...entry,
+                              customer_name: customer?.name,
+                              phone_number: customer?.phone_number,
+                            },
+                          })
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.medIconBadge}>
+                          <Ionicons name="receipt" size={16} color={COLORS.primary} />
+                        </View>
+                        <View style={styles.historyInfo}>
+                          <Text style={styles.historyMedName} numberOfLines={1}>
+                            Purchase Record
+                          </Text>
+                          <Text style={styles.historyQty}>Lump sum purchase</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                            <Text style={styles.historyTimestamp}>{fullDateStr}</Text>
+                            {entry.is_pending && (
+                              <View style={styles.pendingBadge}>
+                                <Ionicons name="time-outline" size={11} color="#B45309" style={{ marginRight: 2 }} />
+                                <Text style={styles.pendingBadgeText}>Pending sync</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <View style={styles.historyRight}>
+                          <Text style={styles.historyPrice}>₹{entryTotal}</Text>
+                          <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
       )}
 
-      {/* Record Payment Modal */}
+      {/* Filter Selection Modal */}
       <Modal
-        visible={payModalVisible}
+        visible={filterMenuVisible}
         transparent
-        animationType="slide"
-        onRequestClose={() => setPayModalVisible(false)}
+        animationType="fade"
+        onRequestClose={() => setFilterMenuVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Record Customer Payment</Text>
-            <Text style={styles.modalSubtitle}>
-              Current Due: ₹{totalDue.toFixed(2)}
-            </Text>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter amount paid (₹)"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="numeric"
-              value={paymentAmount}
-              onChangeText={setPaymentAmount}
-              autoFocus
-            />
-
-            <View style={styles.modalActions}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setFilterMenuVisible(false)}
+        >
+          <View style={styles.filterMenuBox}>
+            <Text style={styles.filterMenuHeader}>Filter Purchases</Text>
+            {[
+              { id: 'all', label: 'All purchases' },
+              { id: 'month', label: 'Last 30 days' },
+              { id: '3months', label: 'Last 3 months' },
+            ].map((opt) => (
               <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setPayModalVisible(false)}
+                key={opt.id}
+                style={[
+                  styles.filterOption,
+                  historyFilter === opt.id && styles.filterOptionActive,
+                ]}
+                onPress={() => {
+                  setHistoryFilter(opt.id);
+                  setFilterMenuVisible(false);
+                }}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={handleRecordPayment}
-                disabled={savingPayment}
-              >
-                {savingPayment ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>Save Payment</Text>
+                <Text
+                  style={[
+                    styles.filterOptionText,
+                    historyFilter === opt.id && styles.filterOptionTextActive,
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+                {historyFilter === opt.id && (
+                  <Ionicons name="checkmark" size={18} color={COLORS.primary} />
                 )}
               </TouchableOpacity>
-            </View>
+            ))}
           </View>
-        </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* Edit Customer Modal */}
       <Modal
         visible={editModalVisible}
-        transparent
         animationType="slide"
+        transparent
         onRequestClose={() => setEditModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Edit Customer Details</Text>
+          <View style={styles.editModalContainer}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Customer Details</Text>
+              <TouchableOpacity
+                onPress={() => setEditModalVisible(false)}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.inputLabel}>Full Name *</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Customer Name"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Phone Number</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editPhone}
+                onChangeText={setEditPhone}
+                placeholder="10-digit mobile number"
+                keyboardType="phone-pad"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Village / Locality</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editVillage}
+                onChangeText={setEditVillage}
+                placeholder="Village / Area"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Address</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editAddress}
+                onChangeText={setEditAddress}
+                placeholder="Address"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Notes</Text>
+              <TextInput
+                style={[styles.modalInput, { height: 72, textAlignVertical: 'top' }]}
+                value={editNotes}
+                onChangeText={setEditNotes}
+                placeholder="Any special notes or allergies..."
+                multiline
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <View style={styles.modalActionsRow}>
+                <TouchableOpacity
+                  style={styles.deleteCustomerBtn}
+                  onPress={() => {
+                    setEditModalVisible(false);
+                    setDeleteModalVisible(true);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                  <Text style={styles.deleteCustomerBtnText}>Delete</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.saveCustomerBtn}
+                  onPress={handleSaveCustomer}
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.saveCustomerBtnText}>Save Changes</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Record Payment Modal */}
+      <Modal
+        visible={payModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPayModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.payModalContainer}>
+            <Text style={styles.modalTitle}>Record Due Payment</Text>
+            <Text style={styles.payModalSubtitle}>
+              Current due balance: ₹{totalDue.toFixed(0)}
+            </Text>
+
             <TextInput
-              style={styles.modalInput}
-              placeholder="Full Name *"
-              value={editName}
-              onChangeText={setEditName}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Phone Number"
-              keyboardType="phone-pad"
-              value={editPhone}
-              onChangeText={setEditPhone}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Address (Optional)"
-              value={editAddress}
-              onChangeText={setEditAddress}
-            />
-            <TextInput
-              style={[styles.modalInput, { minHeight: 60 }]}
-              placeholder="Notes (Optional)"
-              value={editNotes}
-              onChangeText={setEditNotes}
-              multiline
+              style={styles.payInput}
+              value={paymentAmount}
+              onChangeText={setPaymentAmount}
+              placeholder="Amount (₹)"
+              keyboardType="numeric"
+              autoFocus
             />
 
-            <View style={styles.modalActions}>
+            <View style={styles.modalActionsRow}>
               <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setEditModalVisible(false)}
+                style={styles.cancelBtn}
+                onPress={() => setPayModalVisible(false)}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={handleSaveCustomerEdits}
-                disabled={savingEdit}
+                style={styles.confirmPayBtn}
+                onPress={handleRecordPayment}
+                disabled={savingPayment}
               >
-                {savingEdit ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                {savingPayment ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalConfirmText}>Save Changes</Text>
+                  <Text style={styles.confirmPayBtnText}>Save Payment</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -609,15 +630,15 @@ export default function CustomerProfileScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* Move to Recycle Bin Confirmation */}
+      {/* Confirmation Modal for Delete Customer */}
       <ConfirmationModal
         visible={deleteModalVisible}
         onClose={() => setDeleteModalVisible(false)}
         onConfirm={handleDeleteCustomer}
-        title={`Delete ${customer?.name}?`}
-        message="This customer and their records will be moved to the Recycle Bin. You can restore them anytime within 30 days."
+        title="Move Customer to Recycle Bin?"
+        message="This customer and their records will be stored in the Recycle Bin for 30 days and can be restored at any time."
         confirmText="Move to Bin"
-        cancelText="Keep Customer"
+        cancelText="Cancel"
         isDestructive={true}
         iconName="trash"
         confirmLoading={deleting}
@@ -636,447 +657,400 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
-    paddingTop: Platform.OS === 'android' ? 12 : SPACING.sm,
-    paddingBottom: SPACING.sm,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
+    paddingBottom: 12,
   },
   backButton: {
     width: TOUCH_TARGETS.minWidth,
     height: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
     alignItems: 'flex-start',
-  },
-  headerTitle: {
-    ...TYPOGRAPHY.h2,
-    fontSize: 20,
-    color: COLORS.text,
-    fontWeight: '700',
-    flex: 1,
-    marginHorizontal: SPACING.sm,
-  },
-  editHeaderBtn: {
-    width: TOUCH_TARGETS.minWidth,
-    height: TOUCH_TARGETS.minHeight,
     justifyContent: 'center',
-    alignItems: 'flex-end',
   },
-  customerHeaderCard: {
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  filterPillText: {
+    ...TYPOGRAPHY.labelSmall,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: 40,
+  },
+  profileSection: {
+    marginTop: 8,
+    marginBottom: 24,
   },
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: 16,
   },
   profileMeta: {
     flex: 1,
-    marginLeft: SPACING.md,
+    marginLeft: 14,
   },
-  profileName: {
+  customerName: {
     ...TYPOGRAPHY.h2,
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  profilePhone: {
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    marginVertical: 2,
-  },
-  customerSince: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    marginBottom: SPACING.md,
-  },
-  statItem: {
-    flex: 1,
-    paddingHorizontal: 4,
-  },
-  dueAlertBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FDECE7',
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: '#F8B4A2',
-  },
-  dueAlertTitle: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.error,
-  },
-  dueAlertAmount: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '800',
-    color: COLORS.error,
+    color: COLORS.text,
+    letterSpacing: -0.3,
   },
-  recordPayBtn: {
-    backgroundColor: COLORS.error,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: RADIUS.sm,
-    minHeight: 36,
+  customerPhone: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  editActionBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  recordPayBtnText: {
-    ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  subTabRow: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  subTab: {
-    flex: 1,
-    paddingVertical: SPACING.sm,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-    minHeight: TOUCH_TARGETS.minHeight,
-    justifyContent: 'center',
-  },
-  subTabActive: {
-    borderBottomColor: COLORS.primary,
-  },
-  subTabText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  subTabTextActive: {
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  searchWrap: {
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.sm,
-    backgroundColor: COLORS.surface,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  searchInput: {
-    flex: 1,
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  filterWrap: {
-    backgroundColor: COLORS.surface,
-    paddingBottom: SPACING.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  listContent: {
-    padding: SPACING.md,
-    paddingBottom: 80,
-  },
-  purchaseCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  purchaseCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
-  purchaseDate: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  purchaseItemCount: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  purchaseTotal: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  medBreakdownList: {
-    backgroundColor: COLORS.background,
-    borderRadius: RADIUS.sm,
-    padding: SPACING.sm,
-    marginVertical: SPACING.xs,
-  },
-  medLineItem: {
+  dueNoticeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 3,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
   },
-  medLineLeft: {
+  dueNoticeLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
   },
-  medLineName: {
+  dueNoticeText: {
     ...TYPOGRAPHY.bodySmall,
-    fontSize: 14,
-    fontWeight: '500',
-    color: COLORS.text,
+    color: COLORS.error,
     marginLeft: 6,
-    flex: 1,
   },
-  medLineQty: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginHorizontal: 8,
+  duePaySmallBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: '#FECACA',
   },
-  medLinePrice: {
+  duePaySmallBtnText: {
     ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
+    color: COLORS.error,
     fontWeight: '700',
-    color: COLORS.text,
   },
-  purchaseCardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: SPACING.xs,
-  },
-  viewDetailsText: {
-    ...TYPOGRAPHY.labelSmall,
-    fontSize: 12,
-    color: COLORS.primary,
-    fontWeight: '600',
-    marginRight: 2,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  newPurchaseBtn: {
-    minHeight: TOUCH_TARGETS.minHeight,
+  recordPurchaseBtn: {
     backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.md,
+    height: 52,
+    borderRadius: RADIUS.lg,
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  newPurchaseBtnText: {
-    ...TYPOGRAPHY.label,
+  recordPurchaseBtnText: {
+    ...TYPOGRAPHY.button,
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
-  tabContentContainer: {
-    padding: SPACING.md,
+  historySection: {
+    marginTop: 8,
   },
-  cardBox: {
+  sectionTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 14,
+  },
+  dateGroup: {
+    marginBottom: 20,
+  },
+  dateHeader: {
+    ...TYPOGRAPHY.labelSmall,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  historyCard: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
-    padding: SPACING.lg,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  cardBoxTitle: {
-    ...TYPOGRAPHY.h3,
-    fontSize: 17,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-  },
-  cardBoxText: {
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    lineHeight: 22,
-    marginBottom: SPACING.md,
-  },
-  editNotesBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.primaryLight,
-  },
-  editNotesBtnText: {
-    ...TYPOGRAPHY.labelSmall,
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  detailRow: {
-    marginBottom: SPACING.md,
-  },
-  detailLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  detailValue: {
-    ...TYPOGRAPHY.body,
-    fontSize: 16,
-    color: COLORS.text,
-    fontWeight: '500',
-  },
-  deleteCustBtn: {
-    flexDirection: 'row',
+  medIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.avatarBg,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FDECE7',
-    paddingVertical: SPACING.md,
-    borderRadius: RADIUS.md,
-    marginTop: SPACING.lg,
-    borderWidth: 1,
-    borderColor: '#F8B4A2',
-    minHeight: TOUCH_TARGETS.minHeight,
+    marginRight: 12,
   },
-  deleteCustBtnText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
-    color: COLORS.error,
+  historyInfo: {
+    flex: 1,
+  },
+  historyMedName: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
     fontWeight: '700',
+    color: COLORS.text,
+  },
+  historyQty: {
+    ...TYPOGRAPHY.bodySmall,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  historyTimestamp: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textTertiary,
+    fontSize: 12,
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: RADIUS.pill,
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  pendingBadgeText: {
+    fontSize: 10,
+    color: '#92400E',
+    fontWeight: '700',
+  },
+  historyRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  historyPrice: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginRight: 6,
   },
   centerContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    justifyContent: 'center',
+    padding: 32,
   },
   loadingText: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
     color: COLORS.textSecondary,
-    marginTop: SPACING.md,
+    marginTop: 12,
   },
   emptyContainer: {
-    padding: SPACING.xxl,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    padding: 32,
     alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginTop: 8,
   },
   emptyTitle: {
     ...TYPOGRAPHY.h3,
-    fontSize: 18,
     color: COLORS.text,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.xs,
+    marginTop: 12,
+    fontWeight: '700',
   },
   emptySubtitle: {
     ...TYPOGRAPHY.body,
-    fontSize: 15,
     color: COLORS.textSecondary,
     textAlign: 'center',
+    marginTop: 6,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'center',
+    alignItems: 'center',
     padding: SPACING.lg,
   },
-  modalCard: {
+  filterMenuBox: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    width: '80%',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  filterMenuHeader: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 12,
+  },
+  filterOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: RADIUS.sm,
+  },
+  filterOptionActive: {
+    backgroundColor: COLORS.surfaceSubtle,
+  },
+  filterOptionText: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.text,
+  },
+  filterOptionTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  editModalContainer: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
+    padding: 20,
+    width: '94%',
+    maxHeight: '85%',
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   modalTitle: {
     ...TYPOGRAPHY.h2,
     fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: SPACING.xs,
   },
-  modalSubtitle: {
-    ...TYPOGRAPHY.body,
-    fontSize: 15,
+  inputLabel: {
+    ...TYPOGRAPHY.labelSmall,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.lg,
+    marginBottom: 6,
+    fontWeight: '600',
   },
   modalInput: {
     backgroundColor: COLORS.background,
-    borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-    minHeight: TOUCH_TARGETS.minHeight,
-    ...TYPOGRAPHY.body,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    height: 48,
     fontSize: 16,
     color: COLORS.text,
-    marginBottom: SPACING.md,
+    marginBottom: 14,
   },
-  modalActions: {
+  modalActionsRow: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginTop: SPACING.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    gap: 12,
   },
-  modalCancelBtn: {
+  deleteCustomerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    height: 48,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.error,
+  },
+  deleteCustomerBtnText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.error,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  saveCustomerBtn: {
     flex: 1,
-    minHeight: TOUCH_TARGETS.minHeight,
+    backgroundColor: COLORS.primary,
+    height: 48,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveCustomerBtnText: {
+    ...TYPOGRAPHY.button,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  payModalContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.xl,
+    padding: 20,
+    width: '88%',
+  },
+  payModalSubtitle: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.error,
+    marginVertical: 10,
+    fontWeight: '600',
+  },
+  payInput: {
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 14,
+    height: 52,
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 20,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalCancelText: {
+  cancelBtnText: {
     ...TYPOGRAPHY.label,
-    fontSize: 15,
     color: COLORS.textSecondary,
+    fontWeight: '600',
   },
-  modalConfirmBtn: {
+  confirmPayBtn: {
     flex: 1,
-    minHeight: TOUCH_TARGETS.minHeight,
+    height: 48,
     borderRadius: RADIUS.md,
     backgroundColor: COLORS.primary,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalConfirmText: {
-    ...TYPOGRAPHY.label,
-    fontSize: 15,
+  confirmPayBtnText: {
+    ...TYPOGRAPHY.button,
     color: '#FFFFFF',
     fontWeight: '700',
   },
