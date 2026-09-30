@@ -1,7 +1,7 @@
 # MedTrack Mobile — Android Pharmacy Khata Ledger
 
 **MedTrack** is a dedicated digital khata (customer dues & purchase ledger) mobile application engineered specifically for retail pharmacy counter speed. Built with **React Native (Expo)** and backed by **Supabase (PostgreSQL with Row Level Security)**, it tracks customer medicine purchases, maintains mathematically derived zero-error due balances, and replaces physical paper credit books.
-
+     
 ---
 
 ## 🏛️ System Architecture
